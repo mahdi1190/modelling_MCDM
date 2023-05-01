@@ -7,6 +7,8 @@ df = pd.read_csv("C:\\Users\\james\\Desktop\\Uni\\CPE460\\Assignment 2\Data.csv"
 hydrogen= np.arange(7.7, 7.9, 0.01)
 from pyomo.environ import *
 
+
+Tc = 80+273
 consumption = []
 generation = []
 spot = []
