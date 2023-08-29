@@ -2,15 +2,15 @@ import pandas as pd
 import math
 import numpy as np
 from pyomo.environ import *
-import CoolProp
-import CoolProp.CoolProp as CP
 
 stream_energy = 11 #MW
+
+stream_flow = 10 #kg/s
 stream_temperature = 350 #Kelvin
 
 Tc = stream_temperature
 Td = 20
-year_index=15
+year_index=0
 
 
 def run_model(inital_data, sheet_name):
@@ -29,6 +29,7 @@ def run_model(inital_data, sheet_name):
 
     model.Th = Var(within = Reals, doc = 'Maximum Temperature of hot stream') 
     model.COP = Var(within = Reals, doc = 'Coefficient of Performance') 
+    model.MW = Var(within = Reals, doc = 'Energy Rate of Stream') 
 
     def Constraint1_Rule(model):
         return model.Th - Tc <= max_temp_lift[year_index]
