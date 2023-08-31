@@ -43,7 +43,7 @@ def objective_rule(model):
     total_op_cost = sum((C_op_e * model.P_e[t] + C_op_h * model.P_h[t]) for t in model.T)
     return total_revenue - total_fuel_cost - total_op_cost
 
-model.obj = Objective(rule=objective_rule, sense=maximize)
+model.obj = Objective(rule=objective_rule, sense=minimize)
 
 # Constraints
 
@@ -74,7 +74,7 @@ def efficiency_thermal_fuel_rule(model, t):
 model.efficiency_thermal_fuel = Constraint(model.T, rule=efficiency_thermal_fuel_rule)
 
 # Solve the model
-solver = SolverFactory('baron')
+solver = SolverFactory('gurobi')
 results = solver.solve(model, tee=True)
 
 
