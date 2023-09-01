@@ -1,5 +1,5 @@
 from pyomo.environ import *
-
+import pandas as pd
 # Create a simple model
 model = ConcreteModel()
 
@@ -7,9 +7,14 @@ model = ConcreteModel()
 HOURS = list(range(24))
 model.HOURS = Set(initialize=HOURS)
 
+df = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP2\heat_demand.xlsx")
+
 # Sample energy profile for a chemical plant
-electricity_demand = {h: 500 + 200 * (h in range(8, 17)) for h in HOURS}  # Base demand + peak during working hours
-heat_demand = {h: 1000 + 600 * (h in range(8, 17)) for h in HOURS}  # Base demand + peak during working hours
+#electricity_demand = {h: 500 + 200 * (h in range(8, 17)) for h in HOURS}  # Base demand + peak during working hours
+#heat_demand = {h: 1000 + 600 * (h in range(8, 17)) for h in HOURS}  # Base demand + peak during working hours
+
+electricity_demand = df["elec"].to_numpy()
+heat_demand = df["heat"].to_numpy()
 
 # Decision Variables
 model.CHP_capacity = Var(within=NonNegativeReals)  # Capacity of the CHP system
@@ -30,7 +35,7 @@ co2_per_unit_fuel = 20  # kg CO2 emitted per unit of fuel
 kw_per_unit_fuel = 20  # kw of energy per unit fuel
 max_co2_emissions = 100000  # Maximum allowable kg CO2 per day
 
-max_ramp_rate = 50
+max_ramp_rate = 100
 
 # Constraints
 
