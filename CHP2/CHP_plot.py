@@ -15,14 +15,15 @@ HOURS = list(range(24))
 demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP2\heat_demand.xlsx")
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\markets.xlsx")
 
-electricity_demand = demands["elec"].to_numpy()
+electricity_demand = demands["elec"].to_numpy()*1.2
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
 electricity_market = markets["elec"].to_numpy()
-
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
+NG_market = markets["elec"].to_numpy()
+NG_market_sold = markets["elec_sold"].to_numpy()
 app = dash.Dash(__name__)
 
 # Layout of Dash app
@@ -187,11 +188,12 @@ def pyomomodel():
 
 
     model.useful_heat = Var(model.HOURS, within=NonNegativeReals)# Elec supplied to plant
+    model.useful_elec = Var(model.HOURS, within=NonNegativeReals)# Elec supplied to plant
 
-    model.purchased_electricity = Var(model.HOURS, within=NonNegativeReals, initialize=1E-6)
+    model.purchased_electricity = Var(model.HOURS, within=NonNegativeReals)
     #Heat storage rules
-    storage_efficiency = 0.7  # Efficiency of heat storage (0.9 means 90% efficient)
-    withdrawal_efficiency = 0.7  # Efficiency of heat withdrawal (0.9 means 90% efficient)
+    storage_efficiency = 0.8  # Efficiency of heat storage (0.9 means 90% efficient)
+    withdrawal_efficiency = 0.8  # Efficiency of heat withdrawal (0.9 means 90% efficient)
 
     max_storage_capacity = 1000  # Maximum heat storage capacity
 
@@ -199,9 +201,8 @@ def pyomomodel():
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)  # Heat withdrawn at each hour
 
     #refrigeration rules
-    COP_h = 1
-    COP_e = 1
-
+    COP_h = 2
+    COP_e = 0.01
     model.refrigeration_produced = Var(model.HOURS, within=NonNegativeReals)  # Refrigeration produced at each hour
     model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)  # Heat used for cooling at each hour#
     model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)  # Elec used for cooling at each hour
@@ -211,16 +212,15 @@ def pyomomodel():
 
 
     operating_cost_per_kwh = 0.35  # Cost per kWh of electricity produced
-    fuel_cost_per_unit = 0.08  # Cost per unit of fuel
-    co2_per_unit_fuel = 0.001  # kg CO2 emitted per unit of fuel
-    kw_per_unit_fuel = 1  # kw of energy per unit fuel
+    fuel_cost_per_unit = 0.16  # Cost per unit of fuel
+    co2_per_unit_fuel = 0.001  # kg CO2 emitted per unit of fuel # kw of energy per unit fuel
     max_co2_emissions = 1000000000  # Maximum allowable kg CO2 per day
     max_heat_over_production = 1000
-    max_ramp_rate = 400
+    max_ramp_rate = 300
     # Constraints
     # Electricity Balance Constraint
     def electricity_balance_rule(model, h):
-        return model.electricity_production[h] >= -( model.purchased_electricity[h] - model.electricity_over_production[h] - model.elec_used_for_cooling[h]/COP_e )  # Total electricity demand
+        return model.electricity_production[h] >= model.useful_elec[h] + model.electricity_over_production[h] - model.purchased_electricity[h]
     model.electricity_balance = Constraint(model.HOURS, rule=electricity_balance_rule)
 
     # Modified Heat Balance Constraint
@@ -233,8 +233,16 @@ def pyomomodel():
     model.heat_demand_rule = Constraint(model.HOURS, rule=heat_demand_balance)
 
     def elec_demand_balance(model, h):
-        return model.elec_to_plant[h] == electricity_demand[h]
+        return model.elec_to_plant[h] + model.purchased_electricity[h] == electricity_demand[h]
     model.elec_demand_rule = Constraint(model.HOURS, rule=elec_demand_balance)
+
+    def useful_elec_rule(model, h):
+        return model.useful_elec[h] == model.elec_to_plant[h] + (model.elec_used_for_cooling[h] / COP_e) 
+    model.useful_elec_constraint = Constraint(model.HOURS, rule=useful_elec_rule)
+
+    def elec_over_production_rule(model, h):
+        return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h]
+    model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
     # Energy balance constraints
     def energy_ratio_rule(model, h):
@@ -251,9 +259,6 @@ def pyomomodel():
         return model.useful_heat[h] == model.heat_to_plant[h] + (model.heat_stored[h] * storage_efficiency) + (model.heat_used_for_cooling[h] / COP_h)
     model.useful_heat_constraint = Constraint(model.HOURS, rule=useful_heat_rule)
 
-    def elec_over_production_rule(model, h):
-        return model.electricity_over_production[h] == model.electricity_production[h] - electricity_demand[h]
-    model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
     # CHP capacity constraint5
     def capacity_rule(model, h):
@@ -267,7 +272,7 @@ def pyomomodel():
 
     # Fuel consumption rule
     def fuel_consumed_rule(model, h):
-        return kw_per_unit_fuel * model.fuel_consumed[h] == model.heat_production[h] 
+        return NG_market[h] * model.fuel_consumed[h] == model.heat_production[h] 
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     def initial_heat_stored_rule(model):
@@ -295,7 +300,7 @@ def pyomomodel():
     def storage_dynamics_rule(model, h):
         if h == 0:
             return Constraint.Skip  # Skip for the first hour, or set to initial storage level
-        return model.heat_stored[h] == storage_efficiency * (model.heat_stored[h-1] -(model.heat_withdrawn[h]/withdrawal_efficiency) - (model.heat_used_for_cooling[h] / withdrawal_efficiency) + model.heat_over_production[h])
+        return model.heat_stored[h] == storage_efficiency * (model.heat_stored[h-1] -(model.heat_withdrawn[h]/withdrawal_efficiency) - ((model.heat_used_for_cooling[h]/COP_h) / withdrawal_efficiency) + model.heat_over_production[h])
     model.storage_dynamics = Constraint(model.HOURS, rule=storage_dynamics_rule)
 
     # Heat Storage Capacity Constraint
@@ -314,10 +319,10 @@ def pyomomodel():
     # Objective Function: Minimize total cost (capital cost + operating cost + fuel cost)
     def objective_rule(model):
         capital_cost = capital_cost_per_kw * model.CHP_capacity
-        fuel_cost = sum(fuel_cost_per_unit * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost = sum(NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_saved = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
-        heat_saved = 0#sum((0.03* model.heat_over_production[h]) for h in model.HOURS)
+        heat_saved = sum((NG_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         return capital_cost + fuel_cost + elec_cost - (elec_saved + heat_saved)
 
 
