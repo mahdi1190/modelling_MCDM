@@ -280,12 +280,12 @@ def pyomomodel():
 
     # CHP capacity constraint5
     def capacity_rule(model, h):
-        return (model.heat_production[h]) * (1-model.energy_ratio) <= model.CHP_capacity
+        return (model.heat_production[h]) <= model.CHP_capacity
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
 
     # Fuel consumption rule
     def fuel_consumed_rule(model, h):
-        return fuel_energy * model.fuel_consumed[h] == model.heat_production[h] 
+        return fuel_energy * model.fuel_consumed[h] * (1-model.energy_ratio)== model.heat_production[h] 
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     def initial_heat_stored_rule(model):
