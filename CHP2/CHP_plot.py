@@ -16,14 +16,16 @@ demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP2\heat_deman
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\markets.xlsx")
 
 electricity_demand = demands["elec"].to_numpy()
-heat_demand = demands["heat"].to_numpy()*2
+heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
 electricity_market = markets["elec"].to_numpy()
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
-NG_market = markets["elec"].to_numpy()
-NG_market_sold = markets["elec_sold"].to_numpy()
+NG_market = markets["nat_gas"].to_numpy()
+NG_market_sold = markets["nat_gas_sold"].to_numpy()
+
+
 app = dash.Dash(__name__)
 
 # Layout of Dash app
@@ -196,7 +198,7 @@ def pyomomodel():
     COP_h = 2
     COP_e = 0.01
     capital_cost_per_kw = 1000
-    fuel_cost_per_unit = 0.16
+    fuel_energy = 1 #kw
     co2_per_unit_fuel = 0.001
     max_co2_emissions = 1000000000
     max_ramp_rate = 300
@@ -238,10 +240,6 @@ def pyomomodel():
 
 
     # Constraints
-    # Electricity Balance Constraint
-    def electricity_balance_rule(model, h):
-        return model.electricity_production[h] == model.useful_elec[h] + model.electricity_over_production[h] - model.purchased_electricity[h] 
-    model.electricity_balance = Constraint(model.HOURS, rule=electricity_balance_rule)
 
     # Modified Heat Balance Constraint
     def heat_balance_rule(model, h):
@@ -266,7 +264,7 @@ def pyomomodel():
 
     # Energy balance constraints
     def energy_ratio_rule(model, h):
-        return model.electricity_production[h] == model.heat_production[h] * model.energy_ratio
+        return model.electricity_production[h] <= model.heat_production[h] * model.energy_ratio
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # Constraint to limit heat overproduction
@@ -282,17 +280,12 @@ def pyomomodel():
 
     # CHP capacity constraint5
     def capacity_rule(model, h):
-        return (model.heat_production[h]) <= model.CHP_capacity
+        return (model.heat_production[h]) * (1-model.energy_ratio) <= model.CHP_capacity
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
-
-    # CO2 emissions constraint
-    def co2_emission_rule(model):
-        return sum(co2_per_unit_fuel * model.fuel_consumed[h] for h in model.HOURS) <= max_co2_emissions
-    model.co2_constraint = Constraint(rule=co2_emission_rule)
 
     # Fuel consumption rule
     def fuel_consumed_rule(model, h):
-        return NG_market[h] * model.fuel_consumed[h] == model.heat_production[h] 
+        return fuel_energy * model.fuel_consumed[h] == model.heat_production[h] 
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     def initial_heat_stored_rule(model):
