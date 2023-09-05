@@ -67,6 +67,7 @@ def update_graphs(n_intervals):
         heat_taken = [model.heat_withdrawn[h]() for h in model.HOURS]
         heat_plant = [model.heat_to_plant[h]() for h in model.HOURS]
         normal_heat_stored = 100*(np.array(heat_stored))/1000
+        over_heat = [model.heat_over_production[h]() for h in model.HOURS]
         
         purchased_electricity = [model.purchased_electricity[h]() for h in model.HOURS]
         over_electricity = [model.electricity_over_production[h]() for h in model.HOURS]
@@ -95,6 +96,11 @@ def update_graphs(n_intervals):
         storage_layout = base_layout_template.copy()
         storage_layout.update({'title': 'Normalised Heat Storage', 'xaxis': {'title': 'Hours'}, 'yaxis': {'title': '%'}})
 
+        fridge_layout = base_layout_template.copy()
+        fridge_layout.update({'title': 'Normalised Heat Storage', 'xaxis': {'title': 'Hours'}, 'yaxis': {'title': '%'}})
+
+        
+
         electricity_figure = {
             'data': [
                 {'x': list(range(24)), 'y': [electricity_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
@@ -111,6 +117,7 @@ def update_graphs(n_intervals):
                 {'x': list(range(24)), 'y': heat_production, 'type': 'line', 'name': 'Production'},
                 {'x': list(range(24)), 'y': heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
                 {'x': list(range(24)), 'y': heat_plant, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'To plant'},
+                {'x': list(range(24)), 'y': over_heat, 'type': 'line', 'name': 'Over-Production'},
             ],
             'layout': heat_layout,
         }
@@ -119,6 +126,8 @@ def update_graphs(n_intervals):
             'data': [
                 {'x': list(range(24)), 'y': [refrigeration_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
                 {'x': list(range(24)), 'y': cold_production, 'type': 'line', 'name': 'Production'},
+                {'x': list(range(24)), 'y': cooling_elec, 'type': 'line', 'name': 'Cooling Electricity'},
+                {'x': list(range(24)), 'y': cooling_heat, 'type': 'line', 'name': 'Cooling Heat'},
             ],
             'layout': cold_layout,
         }
@@ -132,8 +141,6 @@ def update_graphs(n_intervals):
         purchased_elec = {
             'data': [
                 {'x': list(range(24)), 'y': electricity_market, 'type': 'line', 'name': 'Market'},
-                {'x': list(range(24)), 'y': cooling_elec, 'type': 'line', 'name': 'Cooling Electricity'},
-                {'x': list(range(24)), 'y': cooling_heat, 'type': 'line', 'name': 'Cooling Heat'},
             ],
             'layout': electricity_layout,
         }
@@ -190,23 +197,23 @@ def pyomomodel():
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)  # Heat withdrawn at each hour
 
     #refrigeration rules
-    COP_h = 0.7
-    COP_e = 0.5
+    COP_h = 2
+    COP_e = 1
 
     model.refrigeration_produced = Var(model.HOURS, within=NonNegativeReals)  # Refrigeration produced at each hour
     model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)  # Heat used for cooling at each hour#
     model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)  # Elec used for cooling at each hour
 
 
-    capital_cost_per_kw = 10000  # Cost per kW of CHP capacity
+    capital_cost_per_kw = 3000  # Cost per kW of CHP capacity
 
 
     operating_cost_per_kwh = 0.35  # Cost per kWh of electricity produced
-    fuel_cost_per_unit = 20  # Cost per unit of fuel
-    co2_per_unit_fuel = 20  # kg CO2 emitted per unit of fuel
-    kw_per_unit_fuel = 20  # kw of energy per unit fuel
-    max_co2_emissions = 100000  # Maximum allowable kg CO2 per day
-
+    fuel_cost_per_unit = 0.08  # Cost per unit of fuel
+    co2_per_unit_fuel = 0.001  # kg CO2 emitted per unit of fuel
+    kw_per_unit_fuel = 1  # kw of energy per unit fuel
+    max_co2_emissions = 1000000000  # Maximum allowable kg CO2 per day
+    max_heat_over_production = 1000
     max_ramp_rate = 400
     # Constraints
     # Electricity Balance Constraint
@@ -218,21 +225,26 @@ def pyomomodel():
 
     # Modified Heat Balance Constraint
     def heat_balance_rule(model, h):
-        return model.heat_production[h] + model.heat_withdrawn[h]*withdrawal_efficiency == heat_demand[h] + model.heat_stored[h]*storage_efficiency + model.heat_used_for_cooling[h]/COP_h + model.heat_over_production[h] + model.heat_to_plant[h]
+        return model.heat_production[h] + model.heat_withdrawn[h]*withdrawal_efficiency - model.heat_to_plant[h] == heat_demand[h] + model.heat_stored[h]*storage_efficiency + model.heat_used_for_cooling[h]/COP_h + model.heat_over_production[h]
     model.heat_balance = Constraint(model.HOURS, rule=heat_balance_rule)
 
     def heat_demand_balance(model, h):
-        return model.heat_to_plant[h] >= heat_demand[h]
+        return model.heat_to_plant[h] == heat_demand[h]
     model.heat_demand_rule = Constraint(model.HOURS, rule=heat_demand_balance)
 
     def elec_demand_balance(model, h):
-        return model.elec_to_plant[h] >= electricity_demand[h]
+        return model.elec_to_plant[h] == electricity_demand[h]
     model.elec_demand_rule = Constraint(model.HOURS, rule=elec_demand_balance)
 
     # Energy balance constraints
     def energy_ratio_rule(model, h):
         return model.electricity_production[h] == model.heat_production[h] * model.energy_ratio
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
+
+    # Constraint to limit heat overproduction
+    def heat_over_production_rule(model, h):
+        return model.heat_over_production[h] <= max_heat_over_production
+    model.heat_over_production_constraint = Constraint(model.HOURS, rule=heat_over_production_rule)
 
     # CHP capacity constraint5
     def capacity_rule(model, h):
@@ -246,7 +258,7 @@ def pyomomodel():
 
     # Fuel consumption rule
     def fuel_consumed_rule(model, h):
-        return kw_per_unit_fuel * model.fuel_consumed[h] >= model.heat_production[h] 
+        return kw_per_unit_fuel * model.fuel_consumed[h] == model.heat_production[h] 
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     def initial_heat_stored_rule(model):
@@ -296,7 +308,8 @@ def pyomomodel():
         fuel_cost = sum(fuel_cost_per_unit * model.fuel_consumed[h] for h in model.HOURS)
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_saved = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
-        return capital_cost + fuel_cost + elec_cost - elec_saved
+        heat_saved = 0#sum((0.0003* model.heat_over_production[h]) for h in model.HOURS)
+        return capital_cost + fuel_cost + elec_cost - (elec_saved + heat_saved)
 
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
@@ -308,7 +321,6 @@ def pyomomodel():
     solver.solve(model, tee=True)
 
     return model
-
 
 # Run the Dash app
 if __name__ == '__main__':
