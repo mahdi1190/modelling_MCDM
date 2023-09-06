@@ -280,7 +280,7 @@ def pyomomodel():
 
     # Heat Balance
     def heat_balance_rule(model, h):
-        return model.heat_production[h] == model.heat_over_production[h] + model.useful_heat[h] - model.heat_stored[h]
+        return model.heat_production[h] >= model.heat_over_production[h] + model.useful_heat[h] - model.heat_stored[h]
     model.heat_balance = Constraint(model.HOURS, rule=heat_balance_rule)
 
     # Heat Demand
@@ -302,7 +302,7 @@ def pyomomodel():
 
     # Electricity Demand
     def elec_demand_balance(model, h):
-        return model.elec_to_plant[h] + model.purchased_electricity[h] >= electricity_demand[h]
+        return model.elec_to_plant[h] + model.purchased_electricity[h] == electricity_demand[h]
     model.elec_demand_rule = Constraint(model.HOURS, rule=elec_demand_balance)
 
     # Useful Electricity
