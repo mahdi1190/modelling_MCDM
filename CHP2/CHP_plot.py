@@ -2,6 +2,8 @@ from pyomo.environ import *
 import pandas as pd
 import dash
 import dash_core_components as dcc
+import locale
+locale.setlocale( locale.LC_ALL, '' )
 import os
 import numpy as np
 import dash_html_components as html
@@ -23,8 +25,10 @@ refrigeration_demand = demands["cool"].to_numpy()
 electricity_market = markets["elec"].to_numpy()
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
+carbon_market = markets["carbon"].to_numpy()
+
 heat_market = markets["nat_gas"].to_numpy()
-heat_market_sold = markets["nat_gas_sold"].to_numpy()*0.01
+heat_market_sold = markets["nat_gas_sold"].to_numpy()
 
 
 app = dash.Dash(__name__)
@@ -49,6 +53,8 @@ app.layout = html.Div([
         html.Div(id='total-heat-cost', style={'fontSize': 24}),
         html.Div(id='final-chp-capacity', style={'fontSize': 24}),
         html.Div(id='energy-ratio', style={'fontSize': 24}),
+        html.Div(id='model-cost', style={'fontSize': 24}),
+        html.Div(id='credits', style={'fontSize': 24}),
     ], style={'display': 'flex', 'justifyContent': 'space-around'}),
     
     # Graphs
@@ -57,6 +63,12 @@ app.layout = html.Div([
     dcc.Graph(id='cold-graph'),
     dcc.Graph(id='heat-store-graph'),
     dcc.Graph(id='purchased_elec'),
+    dcc.Graph(id='eff-graph'),  # New graph for eff
+    dcc.Graph(id='carbon-credits'),  # New empty graph 1
+    dcc.Graph(id='empty-graph2'),  # New empty graph 2
+    dcc.Graph(id='empty-graph3'),  # New empty graph 3
+    dcc.Graph(id='empty-graph4'),  # New empty graph 4
+    dcc.Graph(id='empty-graph5'),  # New empty graph 5
     
     # Interval component
     dcc.Interval(
@@ -73,11 +85,18 @@ app.layout = html.Div([
     Output('cold-graph', 'style'),
     Output('heat-store-graph', 'style'),
     Output('purchased_elec', 'style'),
+    Output('eff-graph', 'style'),  # New graph for eff
+    Output('carbon-credits', 'style'),  # New empty graph 1
+    Output('empty-graph2', 'style'),  # New empty graph 2
+    Output('empty-graph3', 'style'),  # New empty graph 3
+    Output('empty-graph4', 'style'),  # New empty graph 4
+    Output('empty-graph5', 'style'),  # New empty graph 5
     [Input('height-slider', 'value')]
 )
 def update_graph_height(height_value):
     style = {'height': f'{height_value}px'}
-    return style, style, style, style, style
+    return style, style, style, style, style, style, style, style, style, style, style  # Add style for new graphs
+
 
 # Callback for updating graphs and figures (existing callback)
 @app.callback(
@@ -86,10 +105,14 @@ def update_graph_height(height_value):
     Output('cold-graph', 'figure'),
     Output('heat-store-graph', 'figure'),
     Output('purchased_elec', 'figure'),
+    Output('eff-graph', 'figure'),
+    Output('carbon-credits', 'figure'),
     Output('total-purchased-electricity', 'children'),
     Output('total-heat-cost', 'children'),
     Output('final-chp-capacity', 'children'),
     Output('energy-ratio', 'children'),
+    Output('model-cost', 'children'),
+    Output('credits', 'children'),
     [Input('interval-component', 'n_intervals')]
 )
 
@@ -123,6 +146,11 @@ def update_graphs(n_intervals):
         total_heat_cost = sum(model.fuel_consumed[h].value * heat_market[h] for h in model.HOURS)
         final_chp_capacity = model.CHP_capacity.value
         energy_ratio = model.energy_ratio.value
+        model_cost = model.objective()
+
+        eff1 = [model.electrical_efficiency[h]() for h in model.HOURS]
+        eff2 = [model.thermal_efficiency[h]() for h in model.HOURS]
+
 
         # Create figures based on these results
 
@@ -152,7 +180,8 @@ def update_graphs(n_intervals):
         market_layout = base_layout_template.copy()
         market_layout.update({'title': 'Energy Market', 'xaxis': {'title': 'Hours'}, 'yaxis': {'title': 'p/kWh'}})
 
-        
+        eff_layout = base_layout_template.copy()
+        eff_layout.update({'title': 'Efficiency', 'xaxis': {'title': 'Hours'}, 'yaxis': {'title': 'Efficiency'}})
 
         electricity_figure = {
             'data': [
@@ -199,12 +228,28 @@ def update_graphs(n_intervals):
             ],
             'layout': market_layout,
         }
+        carbon_credits_figure = {
+        'data': [
+            {'x': list(range(24)), 'y': eff2, 'type': 'line', 'name': 'Thermal Efficiency'},
+            {'x': list(range(24)), 'y': eff1, 'type': 'line', 'name': 'Electrical Efficiency'},
+        ],
+        'layout': eff_layout,
+    }
+        
+        eff_figure = {
+        'data': [
+            {'x': list(range(24)), 'y': eff2, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+        ],
+        'layout': eff_layout,
+    }
         # Return the updated figures
-        return electricity_figure, heat_figure, cold_figure, heat_storage, purchased_elec, \
-           f"Total Purchased Electricity: {round(total_purchased_electricity, 2)}", \
-           f"Total Heat Cost: {round(total_heat_cost, 2)}", \
-           f"Final CHP Capacity: {round(final_chp_capacity, 2)}", \
-           f"Energy Ratio: {round(energy_ratio, 2)}"
+        return electricity_figure, heat_figure, cold_figure, heat_storage, purchased_elec, eff_figure, carbon_credits_figure, \
+           f"Total Purchased Electricity: {locale.currency(total_purchased_electricity, grouping=True)}", \
+           f"Total Heat Cost: {locale.currency(total_heat_cost, grouping=True)}", \
+           f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
+           f"Energy Ratio: {round(energy_ratio, 2)}", \
+           f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
+           f"No Credits: {round(model_cost, -1)} ",  
     else:
         raise dash.exceptions.PreventUpdate
 
@@ -231,16 +276,31 @@ def pyomomodel():
     HOURS = list(range(24))
     model.HOURS = Set(initialize=HOURS)
 
-    # Constants
-    storage_efficiency = 1 # %
-    withdrawal_efficiency = 1 # %
+    # Storage
+    storage_efficiency = 0.6 # %
+    withdrawal_efficiency = 0.6 # %
     max_storage_capacity = 1000 #kW
+    heat_storage_loss_factor = 0.95  # %/timestep
+
+    # Refrigeration
     COP_h = 2
     COP_e = 1
+
+    # CHP params
     capital_cost_per_kw = 1000 # $/kw
     fuel_energy = 1  # kW
-    max_ramp_rate = 600 #kW/timestep
-    heat_storage_loss_factor = 1  # %/timestep
+    max_ramp_rate = 800 #kW/timestep
+
+    TEMP = 700
+    PRES = 50
+        # Efficiency coefficients
+
+
+    # Co2 params
+    co2_per_unit_fuel = 0.1  # kg CO2 per kW of fuel
+    co2_per_unit_elec = 0.2  # kg CO2 per kW of electricity
+    max_co2_emissions = 500  # kg CO2
+    
 
     # -------------- Decision Variables --------------
 
@@ -250,6 +310,9 @@ def pyomomodel():
     model.heat_production = Var(model.HOURS, within=NonNegativeReals)
     model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals)
     model.energy_ratio = Var(within=NonNegativeReals, bounds=(0.1, 0.9))
+
+    model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
+    model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
 
     # Plant Supply and Useful Energy
     model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals)
@@ -261,6 +324,8 @@ def pyomomodel():
     model.purchased_electricity = Var(model.HOURS, within=NonNegativeReals)
     model.heat_stored = Var(model.HOURS, within=NonNegativeReals)
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)
+
+    model.carbon_credits = Var(model.HOURS, within=NonNegativeReals)
 
     # Overproduction and Ramp Rate
     model.heat_over_production = Var(model.HOURS, within=NonNegativeReals)
@@ -280,7 +345,7 @@ def pyomomodel():
 
     # Heat Balance
     def heat_balance_rule(model, h):
-        return model.heat_production[h] >= model.heat_over_production[h] + model.useful_heat[h] - model.heat_stored[h]
+        return model.heat_production[h] >= model.heat_over_production[h] + model.useful_heat[h]
     model.heat_balance = Constraint(model.HOURS, rule=heat_balance_rule)
 
     # Heat Demand
@@ -295,7 +360,7 @@ def pyomomodel():
 
     # Useful Heat
     def useful_heat_rule(model, h):
-        return model.useful_heat[h] == model.heat_to_plant[h] + (model.heat_withdrawn[h] * withdrawal_efficiency) + (model.heat_used_for_cooling[h] / COP_h)
+        return model.useful_heat[h] == model.heat_to_plant[h] - (model.heat_withdrawn[h] * withdrawal_efficiency) + (model.heat_used_for_cooling[h] / COP_h)
     model.useful_heat_constraint = Constraint(model.HOURS, rule=useful_heat_rule)
 
     # ======== Electricity-Related Constraints ========
@@ -317,7 +382,7 @@ def pyomomodel():
 
     # Energy Ratio
     def energy_ratio_rule(model, h):
-        return model.electricity_production[h] <= model.heat_production[h] * model.energy_ratio
+        return model.electricity_production[h] / model.electrical_efficiency[h] == model.energy_ratio * model.heat_production[h] * model.thermal_efficiency[h]
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # ======== CHP and Fuel-Related Constraints ========
@@ -329,8 +394,18 @@ def pyomomodel():
 
     # Fuel Consumption
     def fuel_consumed_rule(model, h):
-        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h]
+        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] / model.thermal_efficiency[h]
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
+
+    # Electrical Efficiency Constraint
+    def electrical_efficiency_rule(model, h):
+        return model.electrical_efficiency[h] == 0.25 + 0.025 * (model.electricity_production[h] / model.CHP_capacity) + 0.001 * TEMP 
+    model.electrical_efficiency_constraint = Constraint(model.HOURS, rule=electrical_efficiency_rule)
+
+    # Thermal Efficiency Constraint
+    def thermal_efficiency_rule(model, h):
+        return model.thermal_efficiency[h] == 0.2 + 0.05 * (model.heat_production[h] / model.CHP_capacity) + 0.001 * TEMP 
+    model.thermal_efficiency_constraint = Constraint(model.HOURS, rule=thermal_efficiency_rule)
 
     # ======== Ramping Constraints ========
 
@@ -386,21 +461,27 @@ def pyomomodel():
         return model.refrigeration_produced[h] == refrigeration_demand[h]
     model.refrigeration_demand_con = Constraint(model.HOURS, rule=refrigeration_demand_rule)
 
+    # ======== CO2 Constraints ========
 
+    def total_co2_emissions_rule(model, h):
+        return (model.purchased_electricity[h] * co2_per_unit_elec + model.fuel_consumed[h] * co2_per_unit_fuel )/1000 - model.carbon_credits[h] <= max_co2_emissions
+    model.total_co2_emissions_constraint = Constraint(model.HOURS, rule=total_co2_emissions_rule)
     # -------------- Objective Function --------------
+
     def objective_rule(model):
         capital_cost = capital_cost_per_kw * model.CHP_capacity
         fuel_cost = sum(heat_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
+        carbon_cost = sum(model.carbon_credits[h] * carbon_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
-        return capital_cost + fuel_cost + elec_cost - (elec_sold + heat_sold)
+        return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold)
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi")
-    solver.options['NonConvex'] = 2
+    solver = SolverFactory("ipopt")
+    #solver.options['NonConvex'] = 2
     solver.solve(model, tee=True)
 
     return model
