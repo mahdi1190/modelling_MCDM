@@ -151,7 +151,12 @@ def update_graphs(n_intervals):
         eff1 = [model.electrical_efficiency[h]() for h in model.HOURS]
         eff2 = [model.thermal_efficiency[h]() for h in model.HOURS]
 
-
+        carbon_buy = [model.credits_purchased[h]() for h in model.INTERVALS]
+        carbon_sell = [model.credits_sold[h]() for h in model.INTERVALS]
+        carbon_held = [model.carbon_credits[h]() for h in model.INTERVALS]
+        carbon_earn = [model.credits_earned[h]() for h in model.INTERVALS]
+        carbon = [model.total_emissions_per_interval[h]() for h in model.INTERVALS]
+        carbon_diff = [model.emissions_difference[h]() for h in model.INTERVALS]
         # Create figures based on these results
 
         base_layout_template = {
@@ -238,7 +243,12 @@ def update_graphs(n_intervals):
         
         eff_figure = {
         'data': [
-            {'x': list(range(24)), 'y': eff2, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+            {'x': list(range(4)), 'y': carbon_buy, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+            {'x': list(range(4)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
+            {'x': list(range(4)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
+            {'x': list(range(4)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
+            {'x': list(range(4)), 'y': carbon, 'type': 'line', 'name': 'Carbon'},
+            {'x': list(range(4)), 'y': carbon_diff, 'type': 'line', 'name': 'Carbon Difference'},
         ],
         'layout': eff_layout,
     }
@@ -249,7 +259,7 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"No Credits: {round(model_cost, -1)} ",  
+           f"No Credits: {model_cost} ",  
     else:
         raise dash.exceptions.PreventUpdate
 
@@ -276,9 +286,13 @@ def pyomomodel():
     HOURS = list(range(24))
     model.HOURS = Set(initialize=HOURS)
 
+    INTERVALS = list(range(4))  # Four 6-hour intervals in a day
+    model.INTERVALS = Set(initialize=INTERVALS)
+
+
     # Storage
-    storage_efficiency = 0.6 # %
-    withdrawal_efficiency = 0.6 # %
+    storage_efficiency = 0.7 # %
+    withdrawal_efficiency = 0.7 # %
     max_storage_capacity = 1000 #kW
     heat_storage_loss_factor = 0.95  # %/timestep
 
@@ -297,9 +311,9 @@ def pyomomodel():
 
 
     # Co2 params
-    co2_per_unit_fuel = 0.1  # kg CO2 per kW of fuel
+    co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
     co2_per_unit_elec = 0.2  # kg CO2 per kW of electricity
-    max_co2_emissions = 500  # kg CO2
+    max_co2_emissions = 10000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -325,8 +339,6 @@ def pyomomodel():
     model.heat_stored = Var(model.HOURS, within=NonNegativeReals)
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)
 
-    model.carbon_credits = Var(model.HOURS, within=NonNegativeReals)
-
     # Overproduction and Ramp Rate
     model.heat_over_production = Var(model.HOURS, within=NonNegativeReals)
     model.electricity_over_production = Var(model.HOURS, within=NonNegativeReals)
@@ -338,9 +350,22 @@ def pyomomodel():
     model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)
 
 
+    # Variables
+    model.co2_emissions = Var(model.HOURS, within=NonNegativeReals)
+    model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
+    model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
+    model.exceeds_cap = Var(model.INTERVALS, within=Binary)
+    model.needs_credits = Var(model.INTERVALS, within=Binary)
+    model.emissions_difference = Var(model.INTERVALS, domain=Reals)
+
+    carbon_credit_price = 10  # Assume a price, you can change this
+    carbon_credit_sell_price = 8  # Assume a sell price, you can change this
+
 
  # -------------- Constraints --------------
-
     # ======== Heat-Related Constraints ========
 
     # Heat Balance
@@ -382,7 +407,7 @@ def pyomomodel():
 
     # Energy Ratio
     def energy_ratio_rule(model, h):
-        return model.electricity_production[h] / model.electrical_efficiency[h] == model.energy_ratio * model.heat_production[h] * model.thermal_efficiency[h]
+        return (model.electricity_production[h] / model.electrical_efficiency[h]) / (model.heat_production[h] * model.thermal_efficiency[h]) == model.energy_ratio
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # ======== CHP and Fuel-Related Constraints ========
@@ -462,20 +487,28 @@ def pyomomodel():
     model.refrigeration_demand_con = Constraint(model.HOURS, rule=refrigeration_demand_rule)
 
     # ======== CO2 Constraints ========
+    def co2_emissions_rule(model, h):
+        return model.co2_emissions[h] == co2_per_unit_fuel * model.fuel_consumed[h] + co2_per_unit_elec * model.purchased_electricity[h]
+    model.co2_emissions_constraint = Constraint(model.HOURS, rule=co2_emissions_rule)
 
-    def total_co2_emissions_rule(model, h):
-        return (model.purchased_electricity[h] * co2_per_unit_elec + model.fuel_consumed[h] * co2_per_unit_fuel )/1000 - model.carbon_credits[h] <= max_co2_emissions
-    model.total_co2_emissions_constraint = Constraint(model.HOURS, rule=total_co2_emissions_rule)
+    def total_emissions_per_interval_rule(model, i):
+        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*6, (i+1)*6))
+    model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
+
+    def emissions_difference_rule(model, i):
+        return model.emissions_difference[i] == model.total_emissions_per_interval[i] - max_co2_emissions
+
+    model.emissions_difference_constraint = Constraint(model.INTERVALS, rule=emissions_difference_rule)
     # -------------- Objective Function --------------
 
     def objective_rule(model):
         capital_cost = capital_cost_per_kw * model.CHP_capacity
         fuel_cost = sum(heat_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
-        carbon_cost = sum(model.carbon_credits[h] * carbon_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
-        return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold)
+        return capital_cost + fuel_cost + elec_cost - (elec_sold + heat_sold)
+    
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
