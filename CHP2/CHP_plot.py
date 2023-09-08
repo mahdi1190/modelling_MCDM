@@ -247,10 +247,10 @@ def update_graphs(n_intervals):
         
         carbon_credits_figure = {
         'data': [
-            {'x': list(range(4)), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
-            {'x': list(range(4)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
-            {'x': list(range(4)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
-            {'x': list(range(4)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
+            {'x': list(range(12)), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+            {'x': list(range(12)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
+            {'x': list(range(12)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
+            {'x': list(range(12)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
             #{'x': list(range(4)), 'y': carbon, 'type': 'line', 'name': 'Carbon'},
         ],
         'layout': credits_layout,
@@ -286,10 +286,14 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    HOURS = list(range(24))
+    total_time = 24
+    HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
-    INTERVALS = list(range(4))  # Four 6-hour intervals in a day
+
+    no_intervals = 12
+    intervals_time = int(total_time / no_intervals)
+    INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
 
 
@@ -494,52 +498,42 @@ def pyomomodel():
         return model.refrigeration_produced[h] == refrigeration_demand[h]
     model.refrigeration_demand_con = Constraint(model.HOURS, rule=refrigeration_demand_rule)
 
-    # ======== CO2 Constraints ========
+# ======== CO2 Constraints ========
+
     def co2_emissions_rule(model, h):
-        if h == 0:
-            return model.co2_emissions[h] == 0
         return model.co2_emissions[h] == co2_per_unit_fuel * model.fuel_consumed[h] + co2_per_unit_elec * model.purchased_electricity[h]
     model.co2_emissions_constraint = Constraint(model.HOURS, rule=co2_emissions_rule)
 
     def total_emissions_per_interval_rule(model, i):
-        if i == 0:
-            return model.total_emissions_per_interval[i] == 0
-        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*6, (i+1)*6))
+        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*intervals_time, (i+1)*intervals_time))
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
     def carbon_credits_needed_rule(model, i):
-        if i == 0:
-            return Constraint.Skip  # Skip the first hour
-        return model.carbon_credits[i] + model.credits_unheld[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
+        return model.carbon_credits[i] + model.credits_used_to_offset[i] + model.credits_sold[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
     model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
+
+    def carbon_credits_limit_rule(model, i):
+        return model.carbon_credits[i] <= model.total_emissions_per_interval[i] - model.credits_earned[i] 
+    model.carbon_credits_limit_constraint = Constraint(model.INTERVALS, rule=carbon_credits_limit_rule)
 
     def carbon_credits_earned_rule(model, i):
         if i == 0:
-            return model.credits_earned[i] == 0  # Skip the first hour
+            return model.credits_earned[i] == 0  # For the first interval
         return model.credits_earned[i] == model.carbon_credits[i] - model.total_emissions_per_interval[i] + max_co2_emissions
     model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
 
-    def credits_sold_limit_rule(model, i):
-        return model.credits_sold[i] <= model.credits_earned[i] + model.credits_unheld[i]
-    model.credits_sold_limit = Constraint(model.INTERVALS, rule=credits_sold_limit_rule)
-
-    # Define credits_unheld
-    def credits_unheld_rule(model, i):
-        return model.credits_unheld[i] == model.credits_used_to_offset[i] + model.credits_sold[i]
-    model.credits_unheld_constraint = Constraint(model.INTERVALS, rule=credits_unheld_rule)
-
-    # Ensure credits_unheld doesn't exceed available credits
+    # Ensure credits_unheld doesn't exceed credits earned and previously held
     def credits_unheld_limit_rule(model, i):
         if i == 0:
-            return model.credits_unheld[i] == 0 # For the first hour
-        return model.credits_unheld[i] <= model.credits_held[i - 1] + model.credits_earned[i]
+            return model.credits_used_to_offset[i] + model.credits_sold[i] <= model.credits_earned[i]  # For the first interval
+        return model.credits_used_to_offset[i] + model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i]
     model.credits_unheld_limit = Constraint(model.INTERVALS, rule=credits_unheld_limit_rule)
 
-    # Adjust credits_held dynamics
+    # Dynamics of credits held
     def credits_held_dynamics_rule(model, i):
         if i == 0:
-            return model.credits_held[i] == 0  # Skip for the first hour
-        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_unheld[i]
+            return model.credits_held[i] == 0  # For the first interval
+        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_used_to_offset[i] - model.credits_sold[i]
     model.credits_held_dynamics = Constraint(model.INTERVALS, rule=credits_held_dynamics_rule)
 
 
@@ -552,7 +546,7 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS)* 0.8
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
         return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
