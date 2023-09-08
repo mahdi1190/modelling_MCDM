@@ -189,6 +189,9 @@ def update_graphs(n_intervals):
         eff_layout = base_layout_template.copy()
         eff_layout.update({'title': 'Efficiency', 'xaxis': {'title': 'Hours'}, 'yaxis': {'title': 'Efficiency'}})
 
+        credits_layout = base_layout_template.copy()
+        credits_layout.update({'title': 'Carbon Credit Dynamics', 'xaxis': {'title': 'Time Intervals'}, 'yaxis': {'title': 'No of Credits'}})
+
         electricity_figure = {
             'data': [
                 {'x': list(range(24)), 'y': [electricity_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
@@ -234,7 +237,7 @@ def update_graphs(n_intervals):
             ],
             'layout': market_layout,
         }
-        carbon_credits_figure = {
+        eff_figure = {
         'data': [
             {'x': list(range(24)), 'y': eff2, 'type': 'line', 'name': 'Thermal Efficiency'},
             {'x': list(range(24)), 'y': eff1, 'type': 'line', 'name': 'Electrical Efficiency'},
@@ -242,16 +245,15 @@ def update_graphs(n_intervals):
         'layout': eff_layout,
     }
         
-        eff_figure = {
+        carbon_credits_figure = {
         'data': [
             {'x': list(range(4)), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
             {'x': list(range(4)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
             {'x': list(range(4)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
             {'x': list(range(4)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
             #{'x': list(range(4)), 'y': carbon, 'type': 'line', 'name': 'Carbon'},
-            {'x': list(range(4)), 'y': carbon_diff, 'type': 'line', 'name': 'Carbon Difference'},
         ],
-        'layout': eff_layout,
+        'layout': credits_layout,
     }
         # Return the updated figures
         return electricity_figure, heat_figure, cold_figure, heat_storage, purchased_elec, eff_figure, carbon_credits_figure, \
@@ -260,7 +262,7 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"No Credits: {model.below_cap[1]()} {model.above_cap[1]()} ",  
+           f"Credit Cost: {credits}",  
     else:
         raise dash.exceptions.PreventUpdate
 
@@ -313,8 +315,8 @@ def pyomomodel():
 
     # Co2 params
     co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
-    co2_per_unit_elec = 0.4  # kg CO2 per kW of electricity
-    max_co2_emissions = 5000  # kg CO2
+    co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
+    max_co2_emissions = 6000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -360,7 +362,9 @@ def pyomomodel():
     model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
     model.exceeds_cap = Var(model.INTERVALS, within=Binary)
     model.credits_held = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_unheld = Var(model.INTERVALS, within=NonNegativeReals)
     model.emissions_difference = Var(model.INTERVALS, domain=Reals)
+    model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
 
     model.below_cap = Var(model.INTERVALS, domain=Binary)
     model.above_cap = Var(model.INTERVALS, domain=Binary)
@@ -506,7 +510,7 @@ def pyomomodel():
     def carbon_credits_needed_rule(model, i):
         if i == 0:
             return Constraint.Skip  # Skip the first hour
-        return model.carbon_credits[i] >= model.total_emissions_per_interval[i] - max_co2_emissions - model.credits_sold[i]
+        return model.carbon_credits[i] + model.credits_unheld[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
     model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
 
     def carbon_credits_earned_rule(model, i):
@@ -515,15 +519,29 @@ def pyomomodel():
         return model.credits_earned[i] == model.carbon_credits[i] - model.total_emissions_per_interval[i] + max_co2_emissions
     model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
 
-    def credits_dynamics_rule(model, i):
+    def credits_sold_limit_rule(model, i):
+        return model.credits_sold[i] <= model.credits_earned[i] + model.credits_unheld[i]
+    model.credits_sold_limit = Constraint(model.INTERVALS, rule=credits_sold_limit_rule)
+
+    # Define credits_unheld
+    def credits_unheld_rule(model, i):
+        return model.credits_unheld[i] == model.credits_used_to_offset[i] + model.credits_sold[i]
+    model.credits_unheld_constraint = Constraint(model.INTERVALS, rule=credits_unheld_rule)
+
+    # Ensure credits_unheld doesn't exceed available credits
+    def credits_unheld_limit_rule(model, i):
+        if i == 0:
+            return model.credits_unheld[i] == 0 # For the first hour
+        return model.credits_unheld[i] <= model.credits_held[i - 1] + model.credits_earned[i]
+    model.credits_unheld_limit = Constraint(model.INTERVALS, rule=credits_unheld_limit_rule)
+
+    # Adjust credits_held dynamics
+    def credits_held_dynamics_rule(model, i):
         if i == 0:
             return model.credits_held[i] == 0  # Skip for the first hour
-        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i]
-    model.credits_dynamics = Constraint(model.INTERVALS, rule=credits_dynamics_rule)
+        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_unheld[i]
+    model.credits_held_dynamics = Constraint(model.INTERVALS, rule=credits_held_dynamics_rule)
 
-    def credits_sold_limit_rule(model, i):
-        return model.credits_sold[i] <= model.credits_held[i] + model.credits_earned[i]
-    model.credits_sold_limit = Constraint(model.INTERVALS, rule=credits_sold_limit_rule)
 
     # -------------- Objective Function --------------
 
