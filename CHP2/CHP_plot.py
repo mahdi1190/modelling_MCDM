@@ -259,7 +259,7 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"No Credits: {model.below_cap[2]()} {model.above_cap[2]()} ",  
+           f"No Credits: {model.below_cap[1]()} {model.above_cap[1]()} ",  
     else:
         raise dash.exceptions.PreventUpdate
 
@@ -313,7 +313,7 @@ def pyomomodel():
     # Co2 params
     co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
     co2_per_unit_elec = 0.2  # kg CO2 per kW of electricity
-    max_co2_emissions = 5000  # kg CO2
+    max_co2_emissions = 2000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -523,7 +523,7 @@ def pyomomodel():
     def credits_earned_rule(model, i):
         if i==0:
             return Constraint.Skip
-        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i]) * (1-)
+        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i]) * (model.below_cap[i])
     model.credits_earned_constraint = Constraint(model.INTERVALS, rule=credits_earned_rule)
 
     # Constraint to check if emissions are above the cap
@@ -536,7 +536,7 @@ def pyomomodel():
     def credits_purchased_rule(model, i):
         if i==0:
             return Constraint.Skip
-        return model.credits_purchased[i] >= (model.total_emissions_per_interval[i] - max_co2_emissions) * (model.above_cap[i])
+        return model.credits_purchased[i] == (model.total_emissions_per_interval[i] - max_co2_emissions) * (model.above_cap[i])
     model.credits_purchased_constraint = Constraint(model.INTERVALS, rule=credits_purchased_rule)
     # -------------- Objective Function --------------
 
@@ -547,7 +547,8 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.credits_purchased[i] * 10 for i in model.INTERVALS)
-        return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold)
+        carbon_sold = sum(model.credits_earned[i] * 8 for i in model.INTERVALS)
+        return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
