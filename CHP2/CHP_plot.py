@@ -153,6 +153,7 @@ def update_graphs(n_intervals):
 
         carbon_buy = [model.credits_purchased[h]() for h in model.INTERVALS]
         carbon_sell = [model.credits_sold[h]() for h in model.INTERVALS]
+        credits = [model.carbon_credits[h]() for h in model.INTERVALS]
         carbon_held = [model.credits_held[h]() for h in model.INTERVALS]
         carbon_earn = [model.credits_earned[h]() for h in model.INTERVALS]
         carbon = [model.total_emissions_per_interval[h]() for h in model.INTERVALS]
@@ -243,7 +244,7 @@ def update_graphs(n_intervals):
         
         eff_figure = {
         'data': [
-            {'x': list(range(4)), 'y': carbon_buy, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+            {'x': list(range(4)), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
             {'x': list(range(4)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
             {'x': list(range(4)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
             {'x': list(range(4)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
@@ -312,8 +313,8 @@ def pyomomodel():
 
     # Co2 params
     co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
-    co2_per_unit_elec = 0.2  # kg CO2 per kW of electricity
-    max_co2_emissions = 2000  # kg CO2
+    co2_per_unit_elec = 0.4  # kg CO2 per kW of electricity
+    max_co2_emissions = 5000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -502,42 +503,28 @@ def pyomomodel():
         return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*6, (i+1)*6))
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
-    def emissions_difference_rule(model, i):
-        return model.emissions_difference[i] == model.total_emissions_per_interval[i] - max_co2_emissions
-    model.emissions_difference_constraint = Constraint(model.INTERVALS, rule=emissions_difference_rule)
+    def carbon_credits_needed_rule(model, i):
+        if i == 0:
+            return Constraint.Skip  # Skip the first hour
+        return model.carbon_credits[i] >= model.total_emissions_per_interval[i] - max_co2_emissions - model.credits_sold[i]
+    model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
 
-    # Heat Storage Dynamics
+    def carbon_credits_earned_rule(model, i):
+        if i == 0:
+            return model.credits_earned[i] == 0  # Skip the first hour
+        return model.credits_earned[i] == model.carbon_credits[i] - model.total_emissions_per_interval[i] + max_co2_emissions
+    model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
+
     def credits_dynamics_rule(model, i):
         if i == 0:
-            return model.credits_held[i] == 0
-        return model.credits_held[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_purchased[i] + 1E2
+            return model.credits_held[i] == 0  # Skip for the first hour
+        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i]
     model.credits_dynamics = Constraint(model.INTERVALS, rule=credits_dynamics_rule)
 
-    # Constraint to check if emissions are below the cap
-    def below_cap_rule(model, i):
-        M = 1E6  # You might want to set M to a reasonably large value if max_co2_emissions isn't large enough.
-        return (max_co2_emissions - model.total_emissions_per_interval[i]) <= M * model.below_cap[i]
-    model.below_cap_constraint = Constraint(model.INTERVALS, rule=below_cap_rule)
+    def credits_sold_limit_rule(model, i):
+        return model.credits_sold[i] <= model.credits_held[i] + model.credits_earned[i]
+    model.credits_sold_limit = Constraint(model.INTERVALS, rule=credits_sold_limit_rule)
 
-    # Constraint to calculate credits earned
-    def credits_earned_rule(model, i):
-        if i==0:
-            return Constraint.Skip
-        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i]) * (model.below_cap[i])
-    model.credits_earned_constraint = Constraint(model.INTERVALS, rule=credits_earned_rule)
-
-    # Constraint to check if emissions are above the cap
-    def above_cap_rule(model, i):
-        M = 1E6  # Adjust as needed
-        return (model.total_emissions_per_interval[i] - max_co2_emissions) <= M * model.above_cap[i]
-    model.above_cap_constraint = Constraint(model.INTERVALS, rule=above_cap_rule)
-
-    # Constraint to calculate credits purchased
-    def credits_purchased_rule(model, i):
-        if i==0:
-            return Constraint.Skip
-        return model.credits_purchased[i] == (model.total_emissions_per_interval[i] - max_co2_emissions) * (model.above_cap[i])
-    model.credits_purchased_constraint = Constraint(model.INTERVALS, rule=credits_purchased_rule)
     # -------------- Objective Function --------------
 
     def objective_rule(model):
@@ -546,8 +533,8 @@ def pyomomodel():
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
-        carbon_cost = sum(model.credits_purchased[i] * 10 for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_earned[i] * 8 for i in model.INTERVALS)
+        carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS)* 0.8
         return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
