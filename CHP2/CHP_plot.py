@@ -15,8 +15,8 @@ last_mod_time = 0
 HOURS = list(range(24))
 
 
-demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP2\heat_demand.xlsx")
-markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\markets.xlsx")
+demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
+markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
 
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
@@ -25,7 +25,7 @@ refrigeration_demand = demands["cool"].to_numpy()
 electricity_market = markets["elec"].to_numpy()
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
-carbon_market = markets["carbon"].to_numpy()
+carbon_market = markets["carbon"].to_numpy() / 1000
 
 heat_market = markets["nat_gas"].to_numpy()
 heat_market_sold = markets["nat_gas_sold"].to_numpy()
@@ -194,10 +194,10 @@ def update_graphs(n_intervals):
 
         electricity_figure = {
             'data': [
-                {'x': list(range(24)), 'y': [electricity_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
-                {'x': list(range(24)), 'y': electricity_production, 'type': 'line', 'name': 'Production'},
-                {'x': list(range(24)), 'y': [purchased_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Purchased Electricity'},
-                {'x': list(range(24)), 'y': [over_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Over-Produced Electricity'}
+                {'x': list(range(24)), 'y': [electricity_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand',},
+                {'x': list(range(24)), 'y': electricity_production, 'type': 'line', 'name': 'Production', 'line': {'color': 'blue'}},
+                {'x': list(range(24)), 'y': [purchased_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash', 'line': {'color': 'hydrogen'}}, 'name': 'Purchased Electricity'},
+                {'x': list(range(24)), 'y': [over_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Over-Produced Electricity'}
             ],
             'layout': electricity_layout,
         }
@@ -262,7 +262,7 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"Credit Cost: {credits}",  
+           f"Credit Cost: NaN",  
     else:
         raise dash.exceptions.PreventUpdate
 
@@ -308,19 +308,19 @@ def pyomomodel():
     COP_e = 1
 
     # CHP params
-    capital_cost_per_kw = 1 # $/kw
+    capital_cost_per_kw = 1000 # $/kw
     fuel_energy = 1  # kW
-    max_ramp_rate = 800 #kW/timestep
+    max_ramp_rate = 500 #kW/timestep
 
     TEMP = 700
     PRES = 50
-        # Efficiency coefficients
+    # Efficiency coefficients
 
 
     # Co2 params
     co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 6000  # kg CO2
+    max_co2_emissions = 100  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -373,10 +373,6 @@ def pyomomodel():
     model.below_cap = Var(model.INTERVALS, domain=Binary)
     model.above_cap = Var(model.INTERVALS, domain=Binary)
 
-    carbon_credit_price = 10  # Assume a price, you can change this
-    carbon_credit_sell_price = 8  # Assume a sell price, you can change this
-
-
  # -------------- Constraints --------------
     # ======== Heat-Related Constraints ========
 
@@ -414,24 +410,24 @@ def pyomomodel():
 
     # Overproduction of Electricity
     def elec_over_production_rule(model, h):
-        return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h]
+        return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h] + model.purchased_electricity[h]
     model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
     # Energy Ratio
     def energy_ratio_rule(model, h):
-        return (model.electricity_production[h] / model.electrical_efficiency[h]) / (model.heat_production[h] * model.thermal_efficiency[h]) == model.energy_ratio
+        return (model.electricity_production[h] / model.electrical_efficiency[h]) / (model.heat_production[h] / model.thermal_efficiency[h]) == model.energy_ratio
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # ======== CHP and Fuel-Related Constraints ========
 
     # CHP Capacity
     def capacity_rule(model, h):
-        return model.heat_production[h] <= model.CHP_capacity
+        return model.CHP_capacity >= (model.heat_production[h] + model.heat_stored[h]) * 1.2
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
 
     # Fuel Consumption
     def fuel_consumed_rule(model, h):
-        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] / model.thermal_efficiency[h]
+        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] * model.thermal_efficiency[h]
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     # Electrical Efficiency Constraint
@@ -546,7 +542,7 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.1
         return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
