@@ -330,13 +330,13 @@ def pyomomodel():
     # CHP params
     capital_cost_per_kw = 1000 # $/kw
     fuel_energy = 1  # kW
-    max_ramp_rate = 500 #kW/timestep
+    max_ramp_rate = 500  #kW/timestep
 
     TEMP = 700
     PRES = 50
     # Efficiency coefficients
     ng_coeffs = {"elec": [0.25, 0.025, 0.001], "thermal": [0.2, 0.05, 0.001]}  # Placeholder
-    h2_coeffs = {"elec": [0.2, 0.02, 0.0015], "thermal": [0.18, 0.04, 0.0012]}  # Placeholder
+    h2_coeffs = {"elec": [0.18, 0.02, 0.0015], "thermal": [0.15, 0.04, 0.0012]}  # Placeholder
 
 
     # Co2 params
@@ -344,7 +344,7 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 4000  # kg CO2
+    max_co2_emissions = 0  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -401,6 +401,11 @@ def pyomomodel():
     model.emissions_difference = Var(model.INTERVALS, domain=Reals)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
 
+    model.hydrogen_used = Var(model.HOURS, within=Binary)
+    model.hydrogen_ever_used = Var(within=Binary)
+
+    model.x_e = Var(model.HOURS, within=NonNegativeReals)  # Assuming the ratio is always non-negative.
+
  # -------------- Constraints --------------
     # ======== Heat-Related Constraints ========
 
@@ -418,6 +423,7 @@ def pyomomodel():
     def heat_over_production_rule(model, h):
         return model.heat_over_production[h] == model.heat_production[h] - model.useful_heat[h]
     model.heat_over_production_constraint = Constraint(model.HOURS, rule=heat_over_production_rule)
+
 
     # Useful Heat
     def useful_heat_rule(model, h):
@@ -438,19 +444,19 @@ def pyomomodel():
 
     # Overproduction of Electricity
     def elec_over_production_rule(model, h):
-        return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h] + model.purchased_electricity[h]
+        return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h]
     model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
     # Energy Ratio
     def energy_ratio_rule(model, h):
-        return (model.electricity_production[h] / (model.heat_production[h] / model.thermal_efficiency[h]) == model.energy_ratio * model.electrical_efficiency[h])
+        return model.electricity_production[h] * model.thermal_efficiency[h] == model.heat_production[h] * model.energy_ratio
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # ======== CHP and Fuel-Related Constraints ========
 
     # CHP Capacity
     def capacity_rule(model, h):
-        return model.CHP_capacity >= (model.heat_production[h] + model.heat_stored[h]) * 1.2
+        return model.CHP_capacity >= (model.heat_production[h] + model.heat_stored[h]) + model.electricity_production[h]
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
 
     # Fuel Consumption
@@ -458,24 +464,25 @@ def pyomomodel():
         return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] * model.thermal_efficiency[h]
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
-
     def electrical_efficiency_rule(model, h):
-        # Calculate efficiency adjustment based on the fuel blend and corresponding coefficients
-        efficiency_adjustment = (
-            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["elec"][0] + ng_coeffs["elec"][1] * (model.electricity_production[h] / model.CHP_capacity) + ng_coeffs["elec"][2] * TEMP) +
-            model.fuel_blend_h2[h] * (h2_coeffs["elec"][0] + h2_coeffs["elec"][1] * (model.electricity_production[h] / model.CHP_capacity) + h2_coeffs["elec"][2] * TEMP)
+        efficiency_adjustment_times_CHP = (
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * 
+            (ng_coeffs["elec"][0] * model.CHP_capacity + ng_coeffs["elec"][1] * model.electricity_production[h] + ng_coeffs["elec"][2] * TEMP * model.CHP_capacity) +
+            model.fuel_blend_h2[h] * 
+            (h2_coeffs["elec"][0] * model.CHP_capacity + h2_coeffs["elec"][1] * model.electricity_production[h] + h2_coeffs["elec"][2] * TEMP * model.CHP_capacity)
         )
-        return model.electrical_efficiency[h] == efficiency_adjustment
+        return model.electrical_efficiency[h] * model.CHP_capacity == efficiency_adjustment_times_CHP
 
     model.electrical_efficiency_constraint = Constraint(model.HOURS, rule=electrical_efficiency_rule)
 
     def thermal_efficiency_rule(model, h):
-        # Calculate efficiency adjustment based on the fuel blend and corresponding coefficients
-        efficiency_adjustment = (
-            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["thermal"][0] + ng_coeffs["thermal"][1] * (model.heat_production[h] / model.CHP_capacity) + ng_coeffs["thermal"][2] * TEMP) +
-            model.fuel_blend_h2[h] * (h2_coeffs["thermal"][0] + h2_coeffs["thermal"][1] * (model.heat_production[h] / model.CHP_capacity) + h2_coeffs["thermal"][2] * TEMP)
+        efficiency_adjustment_times_CHP = (
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * 
+            (ng_coeffs["thermal"][0] * model.CHP_capacity + ng_coeffs["thermal"][1] * model.heat_production[h] + ng_coeffs["thermal"][2] * TEMP * model.CHP_capacity) +
+            model.fuel_blend_h2[h] * 
+            (h2_coeffs["thermal"][0] * model.CHP_capacity + h2_coeffs["thermal"][1] * model.heat_production[h] + h2_coeffs["thermal"][2] * TEMP * model.CHP_capacity)
         )
-        return model.thermal_efficiency[h] == efficiency_adjustment
+        return model.thermal_efficiency[h] * model.CHP_capacity == efficiency_adjustment_times_CHP
 
     model.thermal_efficiency_constraint = Constraint(model.HOURS, rule=thermal_efficiency_rule)
 
@@ -587,7 +594,9 @@ def pyomomodel():
     # -------------- Objective Function --------------
 
     def objective_rule(model):
-        capital_cost = capital_cost_per_kw * model.CHP_capacity
+        capital_cost = capital_cost_per_kw * model.CHP_capacity 
+        capital_cost = 3000 + 20 * model.CHP_capacity  - 0.5 * TEMP + 0.01 * model.CHP_capacity **2 + 0.001 * TEMP**2 - 0.02 * model.CHP_capacity  * TEMP
+
         fuel_cost_NG = sum(model.fuel_blend_ng[h] * NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         fuel_cost_H2 = sum(model.fuel_blend_h2[h] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         fuel_cost_BM = sum(model.fuel_blend_biomass[h] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS)
@@ -597,8 +606,8 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
-        return capital_cost + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.5
+        return capital_cost*0.01 + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
