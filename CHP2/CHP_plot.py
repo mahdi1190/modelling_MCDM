@@ -306,12 +306,12 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 1000
+    total_time = 24
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
 
-    no_intervals = 4
+    no_intervals = 6
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
@@ -336,7 +336,7 @@ def pyomomodel():
     PRES = 50
     # Efficiency coefficients
     ng_coeffs = {"elec": [0.25, 0.025, 0.001], "thermal": [0.2, 0.05, 0.001]}  # Placeholder
-    h2_coeffs = {"elec": [0.3, 0.02, 0.0015], "thermal": [0.18, 0.04, 0.0012]}  # Placeholder
+    h2_coeffs = {"elec": [0.2, 0.02, 0.0015], "thermal": [0.18, 0.04, 0.0012]}  # Placeholder
 
 
     # Co2 params
@@ -344,7 +344,7 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 100  # kg CO2
+    max_co2_emissions = 4000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -401,16 +401,6 @@ def pyomomodel():
     model.emissions_difference = Var(model.INTERVALS, domain=Reals)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
 
-
-
-    # Auxiliary Variables for Linearization
-    model.Z_e = Var(model.HOURS, within=NonNegativeReals)
-    model.Z_t = Var(model.HOURS, within=NonNegativeReals)
-    model.Y_h = Var(model.HOURS, within=NonNegativeReals)
-
-    #linearizing efficiency
-    model.X_e = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))  # Electrical
-    model.X_t = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))  # Thermal
  # -------------- Constraints --------------
     # ======== Heat-Related Constraints ========
 
@@ -451,21 +441,10 @@ def pyomomodel():
         return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h] + model.purchased_electricity[h]
     model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
-    # Energy Ratio Linearized
-    def energy_ratio_linearized_rule(model, h):
-        return model.Z_e[h] == model.energy_ratio * model.Z_t[h]
-    model.energy_ratio_linearized_constraint = Constraint(model.HOURS, rule=energy_ratio_linearized_rule)
-
-    # Definition of Z_e
-    def Z_e_definition_rule(model, h):
-        return model.Z_e[h] * model.electrical_efficiency[h] == model.electricity_production[h]
-    model.Z_e_definition_constraint = Constraint(model.HOURS, rule=Z_e_definition_rule)
-
-    # Definition of Z_t
-    def Z_t_definition_rule(model, h):
-        return model.Z_t[h] * model.thermal_efficiency[h] == model.heat_production[h]
-    model.Z_t_definition_constraint = Constraint(model.HOURS, rule=Z_t_definition_rule)
-
+    # Energy Ratio
+    def energy_ratio_rule(model, h):
+        return (model.electricity_production[h] / (model.heat_production[h] / model.thermal_efficiency[h]) == model.energy_ratio * model.electrical_efficiency[h])
+    model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
     # ======== CHP and Fuel-Related Constraints ========
 
@@ -474,40 +453,31 @@ def pyomomodel():
         return model.CHP_capacity >= (model.heat_production[h] + model.heat_stored[h]) * 1.2
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
 
-    # Fuel Consumption Linearized
-    def fuel_consumed_linearized_rule1(model, h):
-        return model.Y_h[h] == fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio)
-    model.fuel_consumed_linearized_constraint1 = Constraint(model.HOURS, rule=fuel_consumed_linearized_rule1)
+    # Fuel Consumption
+    def fuel_consumed_rule(model, h):
+        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] * model.thermal_efficiency[h]
+    model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
-    def fuel_consumed_linearized_rule2(model, h):
-        return model.Y_h[h] * model.thermal_efficiency[h] == model.heat_production[h]
-    model.fuel_consumed_linearized_constraint2 = Constraint(model.HOURS, rule=fuel_consumed_linearized_rule2)
 
-# Linearized constraints for Electrical Efficiency
-    def X_e_definition_rule(model, h):
-        return model.X_e[h] * model.CHP_capacity == model.electricity_production[h]
-    model.X_e_definition = Constraint(model.HOURS, rule=X_e_definition_rule)
-
-    def electrical_efficiency_linearized_rule(model, h):
+    def electrical_efficiency_rule(model, h):
+        # Calculate efficiency adjustment based on the fuel blend and corresponding coefficients
         efficiency_adjustment = (
-            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["elec"][0] + ng_coeffs["elec"][1] * model.X_e[h] + ng_coeffs["elec"][2] * TEMP) +
-            model.fuel_blend_h2[h] * (h2_coeffs["elec"][0] + h2_coeffs["elec"][1] * model.X_e[h] + h2_coeffs["elec"][2] * TEMP)
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["elec"][0] + ng_coeffs["elec"][1] * (model.electricity_production[h] / model.CHP_capacity) + ng_coeffs["elec"][2] * TEMP) +
+            model.fuel_blend_h2[h] * (h2_coeffs["elec"][0] + h2_coeffs["elec"][1] * (model.electricity_production[h] / model.CHP_capacity) + h2_coeffs["elec"][2] * TEMP)
         )
         return model.electrical_efficiency[h] == efficiency_adjustment
-    model.electrical_efficiency_linearized = Constraint(model.HOURS, rule=electrical_efficiency_linearized_rule)
 
-    # Linearized constraints for Thermal Efficiency
-    def X_t_definition_rule(model, h):
-        return model.X_t[h] * model.CHP_capacity == model.heat_production[h]
-    model.X_t_definition = Constraint(model.HOURS, rule=X_t_definition_rule)
+    model.electrical_efficiency_constraint = Constraint(model.HOURS, rule=electrical_efficiency_rule)
 
-    def thermal_efficiency_linearized_rule(model, h):
+    def thermal_efficiency_rule(model, h):
+        # Calculate efficiency adjustment based on the fuel blend and corresponding coefficients
         efficiency_adjustment = (
-            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["thermal"][0] + ng_coeffs["thermal"][1] * model.X_t[h] + ng_coeffs["thermal"][2] * TEMP) +
-            model.fuel_blend_h2[h] * (h2_coeffs["thermal"][0] + h2_coeffs["thermal"][1] * model.X_t[h] + h2_coeffs["thermal"][2] * TEMP)
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["thermal"][0] + ng_coeffs["thermal"][1] * (model.heat_production[h] / model.CHP_capacity) + ng_coeffs["thermal"][2] * TEMP) +
+            model.fuel_blend_h2[h] * (h2_coeffs["thermal"][0] + h2_coeffs["thermal"][1] * (model.heat_production[h] / model.CHP_capacity) + h2_coeffs["thermal"][2] * TEMP)
         )
         return model.thermal_efficiency[h] == efficiency_adjustment
-    model.thermal_efficiency_linearized = Constraint(model.HOURS, rule=thermal_efficiency_linearized_rule)
+
+    model.thermal_efficiency_constraint = Constraint(model.HOURS, rule=thermal_efficiency_rule)
 
 
     # Constraint to ensure that the sum of the fuel blend percentages equals 1.
@@ -627,15 +597,15 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.1
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
         return capital_cost + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi")
-    solver.options['NonConvex'] = 2
+    solver = SolverFactory("bonmin")
+    #solver.options['NonConvex'] = 2
     solver.solve(model, tee=True)
 
     return model
