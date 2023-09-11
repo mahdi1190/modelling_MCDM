@@ -12,9 +12,6 @@ from dash.dependencies import Input, Output
 # Initialize Dash app
 last_mod_time = 0
 
-HOURS = list(range(24))
-
-
 demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
 
@@ -27,8 +24,13 @@ electricity_market_sold = markets["elec_sold"].to_numpy()
 
 carbon_market = markets["carbon"].to_numpy() / 1000
 
-heat_market = markets["nat_gas"].to_numpy()
+NG_market = markets["nat_gas"].to_numpy()
 heat_market_sold = markets["nat_gas_sold"].to_numpy()
+
+H2_market = markets["hydrogen"].to_numpy()
+
+BM_market = markets["biomass"].to_numpy()
+
 
 
 app = dash.Dash(__name__)
@@ -65,7 +67,7 @@ app.layout = html.Div([
     dcc.Graph(id='purchased_elec'),
     dcc.Graph(id='eff-graph'),  # New graph for eff
     dcc.Graph(id='carbon-credits'),  # New empty graph 1
-    dcc.Graph(id='empty-graph2'),  # New empty graph 2
+    dcc.Graph(id='fuel_blend'),  # New empty graph 2
     dcc.Graph(id='empty-graph3'),  # New empty graph 3
     dcc.Graph(id='empty-graph4'),  # New empty graph 4
     dcc.Graph(id='empty-graph5'),  # New empty graph 5
@@ -87,7 +89,7 @@ app.layout = html.Div([
     Output('purchased_elec', 'style'),
     Output('eff-graph', 'style'),  # New graph for eff
     Output('carbon-credits', 'style'),  # New empty graph 1
-    Output('empty-graph2', 'style'),  # New empty graph 2
+    Output('fuel_blend', 'style'),  # New empty graph 2
     Output('empty-graph3', 'style'),  # New empty graph 3
     Output('empty-graph4', 'style'),  # New empty graph 4
     Output('empty-graph5', 'style'),  # New empty graph 5
@@ -107,6 +109,7 @@ def update_graph_height(height_value):
     Output('purchased_elec', 'figure'),
     Output('eff-graph', 'figure'),
     Output('carbon-credits', 'figure'),
+    Output('fuel_blend', 'figure'),
     Output('total-purchased-electricity', 'children'),
     Output('total-heat-cost', 'children'),
     Output('final-chp-capacity', 'children'),
@@ -126,38 +129,44 @@ def update_graphs(n_intervals):
         last_mod_time = current_mod_time  # Update last modification time
 
         model = pyomomodel()
+        hours_list = list(model.HOURS)
+        intervals_list = list(model.INTERVALS)
 
-        electricity_production = [model.electricity_production[h]() for h in model.HOURS]
-        heat_production = [model.heat_production[h]() for h in model.HOURS]
-        cold_production = [model.refrigeration_produced[h]() for h in model.HOURS]
-        fuel_consumed = [model.fuel_consumed[h]() for h in model.HOURS]
-        heat_stored = [model.heat_stored[h]() for h in model.HOURS]
-        heat_taken = [model.heat_withdrawn[h]() for h in model.HOURS]
-        heat_plant = [model.heat_to_plant[h]() for h in model.HOURS]
+        electricity_production = [model.electricity_production[h]() for h in hours_list]
+        heat_production = [model.heat_production[h]() for h in hours_list]
+        cold_production = [model.refrigeration_produced[h]() for h in hours_list]
+        fuel_consumed = [model.fuel_consumed[h]() for h in hours_list]
+        heat_stored = [model.heat_stored[h]() for h in hours_list]
+        heat_taken = [model.heat_withdrawn[h]() for h in hours_list]
+        heat_plant = [model.heat_to_plant[h]() for h in hours_list]
         normal_heat_stored = 100*(np.array(heat_stored))/1000
-        over_heat = [model.heat_over_production[h]() for h in model.HOURS]
+        over_heat = [model.heat_over_production[h]() for h in hours_list]
         
-        purchased_electricity = [model.purchased_electricity[h]() for h in model.HOURS]
-        over_electricity = [model.electricity_over_production[h]() for h in model.HOURS]
-        cooling_elec = [model.elec_used_for_cooling[h]() for h in model.HOURS]
-        cooling_heat = [model.heat_used_for_cooling[h]() for h in model.HOURS]
+        purchased_electricity = [model.purchased_electricity[h]() for h in hours_list]
+        over_electricity = [model.electricity_over_production[h]() for h in hours_list]
+        cooling_elec = [model.elec_used_for_cooling[h]() for h in hours_list]
+        cooling_heat = [model.heat_used_for_cooling[h]() for h in hours_list]
 
-        total_purchased_electricity = sum(model.purchased_electricity[h].value for h in model.HOURS)
-        total_heat_cost = sum(model.fuel_consumed[h].value * heat_market[h] for h in model.HOURS)
+        total_purchased_electricity = sum(model.purchased_electricity[h].value for h in hours_list)
+        total_heat_cost = sum(model.fuel_consumed[h].value * NG_market[h] for h in hours_list)
         final_chp_capacity = model.CHP_capacity.value
         energy_ratio = model.energy_ratio.value
         model_cost = model.objective()
 
-        eff1 = [model.electrical_efficiency[h]() for h in model.HOURS]
-        eff2 = [model.thermal_efficiency[h]() for h in model.HOURS]
+        eff1 = [model.electrical_efficiency[h]() for h in hours_list]
+        eff2 = [model.thermal_efficiency[h]() for h in hours_list]
 
-        carbon_buy = [model.credits_purchased[h]() for h in model.INTERVALS]
-        carbon_sell = [model.credits_sold[h]() for h in model.INTERVALS]
-        credits = [model.carbon_credits[h]() for h in model.INTERVALS]
-        carbon_held = [model.credits_held[h]() for h in model.INTERVALS]
-        carbon_earn = [model.credits_earned[h]() for h in model.INTERVALS]
-        carbon = [model.total_emissions_per_interval[h]() for h in model.INTERVALS]
-        carbon_diff = [model.emissions_difference[h]() for h in model.INTERVALS]
+        carbon_buy = [model.credits_purchased[h]() for h in intervals_list]
+        carbon_sell = [model.credits_sold[h]() for h in intervals_list]
+        credits = [model.carbon_credits[h]() for h in intervals_list]
+        carbon_held = [model.credits_held[h]() for h in intervals_list]
+        carbon_earn = [model.credits_earned[h]() for h in intervals_list]
+        carbon = [model.total_emissions_per_interval[h]() for h in intervals_list]
+        carbon_diff = [model.emissions_difference[h]() for h in intervals_list]
+
+        blend_H2 = [model.fuel_blend_h2[h]() for h in intervals_list]
+        blend_ng = [model.fuel_blend_ng[h]() for h in intervals_list]
+        blend_bm = [model.fuel_blend_biomass[h]() for h in intervals_list]
         # Create figures based on these results
 
         base_layout_template = {
@@ -192,71 +201,82 @@ def update_graphs(n_intervals):
         credits_layout = base_layout_template.copy()
         credits_layout.update({'title': 'Carbon Credit Dynamics', 'xaxis': {'title': 'Time Intervals'}, 'yaxis': {'title': 'No of Credits'}})
 
+        blend_layout = base_layout_template.copy()
+        blend_layout.update({'title': 'Fuel Blending', 'xaxis': {'title': 'Time Intervals'}, 'yaxis': {'title': '% ratio of fuels'}})
+
         electricity_figure = {
             'data': [
-                {'x': list(range(24)), 'y': [electricity_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand',},
-                {'x': list(range(24)), 'y': electricity_production, 'type': 'line', 'name': 'Production', 'line': {'color': 'blue'}},
-                {'x': list(range(24)), 'y': [purchased_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash', 'line': {'color': 'hydrogen'}}, 'name': 'Purchased Electricity'},
-                {'x': list(range(24)), 'y': [over_electricity[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Over-Produced Electricity'}
+                {'x': list(model.HOURS), 'y': [electricity_demand[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand',},
+                {'x': list(model.HOURS), 'y': electricity_production, 'type': 'line', 'name': 'Production', 'line': {'color': 'blue'}},
+                {'x': list(model.HOURS), 'y': [purchased_electricity[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash', 'line': {'color': 'hydrogen'}}, 'name': 'Purchased Electricity'},
+                {'x': list(model.HOURS), 'y': [over_electricity[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Over-Produced Electricity'}
             ],
             'layout': electricity_layout,
         }
 
         heat_figure = {
             'data': [
-                {'x': list(range(24)), 'y': [heat_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
-                {'x': list(range(24)), 'y': heat_production, 'type': 'line', 'name': 'Production'},
-                {'x': list(range(24)), 'y': heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
-                {'x': list(range(24)), 'y': over_heat, 'type': 'line', 'name': 'Over-Production'},
+                {'x': list(model.HOURS), 'y': [heat_demand[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
+                {'x': list(model.HOURS), 'y': heat_production, 'type': 'line', 'name': 'Production'},
+                {'x': list(model.HOURS), 'y': heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
+                {'x': list(model.HOURS), 'y': over_heat, 'type': 'line', 'name': 'Over-Production'},
             ],
             'layout': heat_layout,
         }
 
         cold_figure = {
             'data': [
-                {'x': list(range(24)), 'y': [refrigeration_demand[h] for h in list(range(24))], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
-                {'x': list(range(24)), 'y': cold_production, 'type': 'line', 'name': 'Production'},
-                {'x': list(range(24)), 'y': cooling_elec, 'type': 'line', 'name': 'Cooling Electricity'},
-                {'x': list(range(24)), 'y': cooling_heat, 'type': 'line', 'name': 'Cooling Heat'},
+                {'x': list(model.HOURS), 'y': [refrigeration_demand[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand'},
+                {'x': list(model.HOURS), 'y': cold_production, 'type': 'line', 'name': 'Production'},
+                {'x': list(model.HOURS), 'y': cooling_elec, 'type': 'line', 'name': 'Cooling Electricity'},
+                {'x': list(model.HOURS), 'y': cooling_heat, 'type': 'line', 'name': 'Cooling Heat'},
             ],
             'layout': cold_layout,
         }
         heat_storage = {
             'data': [
-                {'x': list(range(24)), 'y': normal_heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
+                {'x': list(model.HOURS), 'y': normal_heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
             ],
             'layout': storage_layout,
         }
 
         purchased_elec = {
             'data': [
-                {'x': list(range(24)), 'y': electricity_market, 'type': 'line', 'name': 'Purchased Electricity', 'line': {'color': 'blue'}},
-                {'x': list(range(24)), 'y': heat_market, 'type': 'line', 'name': 'Purchased Fuel', 'line': {'color': 'red'}},
-                {'x': list(range(24)), 'y': heat_market_sold, 'line': {'width': 3, 'dash': 'dash', 'color': 'red'}, 'name': 'Sold Heat'},
-                {'x': list(range(24)), 'y': electricity_market_sold, 'line': {'width': 3, 'dash': 'dash', 'color': 'blue'}, 'name': 'Sold Electricity'},
+                {'x': list(model.HOURS), 'y': electricity_market, 'type': 'line', 'name': 'Purchased Electricity', 'line': {'color': 'blue'}},
+                {'x': list(model.HOURS), 'y': NG_market, 'type': 'line', 'name': 'Purchased Fuel', 'line': {'color': 'red'}},
+                {'x': list(model.HOURS), 'y': heat_market_sold, 'line': {'width': 3, 'dash': 'dash', 'color': 'red'}, 'name': 'Sold Heat'},
+                {'x': list(model.HOURS), 'y': electricity_market_sold, 'line': {'width': 3, 'dash': 'dash', 'color': 'blue'}, 'name': 'Sold Electricity'},
             ],
             'layout': market_layout,
         }
         eff_figure = {
         'data': [
-            {'x': list(range(24)), 'y': eff2, 'type': 'line', 'name': 'Thermal Efficiency'},
-            {'x': list(range(24)), 'y': eff1, 'type': 'line', 'name': 'Electrical Efficiency'},
+            {'x': list(model.HOURS), 'y': eff2, 'type': 'line', 'name': 'Thermal Efficiency'},
+            {'x': list(model.HOURS), 'y': eff1, 'type': 'line', 'name': 'Electrical Efficiency'},
         ],
         'layout': eff_layout,
     }
         
         carbon_credits_figure = {
         'data': [
-            {'x': list(range(12)), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
-            {'x': list(range(12)), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
-            {'x': list(range(12)), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
-            {'x': list(range(12)), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
-            #{'x': list(range(4)), 'y': carbon, 'type': 'line', 'name': 'Carbon'},
+            {'x': list(model.INTERVALS), 'y': credits, 'type': 'line', 'name': 'Carbon Credits Purchased'},
+            {'x': list(model.INTERVALS), 'y': carbon_sell, 'type': 'line', 'name': 'Carbon Credits Sold'},
+            {'x': list(model.INTERVALS), 'y': carbon_held, 'type': 'line', 'name': 'Carbon Credits Held'},
+            {'x': list(model.INTERVALS), 'y': carbon_earn, 'type': 'line', 'name': 'Carbon Credits Earned'},
         ],
         'layout': credits_layout,
     }
+        
+        fuel_blend_figure = {
+        'data': [
+            {'x': list(model.HOURS), 'y': blend_H2, 'type': 'line', 'name': 'Hydrogen'},
+            {'x': list(model.HOURS), 'y': blend_bm, 'type': 'line', 'name': 'Biomass'},
+            {'x': list(model.HOURS), 'y': blend_ng, 'type': 'line', 'name': 'Natural Gas'},
+        ],
+        'layout': blend_layout,
+    }
         # Return the updated figures
-        return electricity_figure, heat_figure, cold_figure, heat_storage, purchased_elec, eff_figure, carbon_credits_figure, \
+        return electricity_figure, heat_figure, cold_figure, heat_storage, purchased_elec, eff_figure, carbon_credits_figure, fuel_blend_figure, \
            f"Total Purchased Electricity: {locale.currency(total_purchased_electricity, grouping=True)}", \
            f"Total Heat Cost: {locale.currency(total_heat_cost, grouping=True)}", \
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
@@ -286,12 +306,12 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 24
+    total_time = 1000
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
 
-    no_intervals = 12
+    no_intervals = 4
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
@@ -315,10 +335,14 @@ def pyomomodel():
     TEMP = 700
     PRES = 50
     # Efficiency coefficients
+    ng_coeffs = {"elec": [0.25, 0.025, 0.001], "thermal": [0.2, 0.05, 0.001]}  # Placeholder
+    h2_coeffs = {"elec": [0.3, 0.02, 0.0015], "thermal": [0.18, 0.04, 0.0012]}  # Placeholder
 
 
     # Co2 params
-    co2_per_unit_fuel = 0.2  # kg CO2 per kW of fuel
+    co2_per_unit_ng = 0.2  # kg CO2 per kW of fuel
+    co2_per_unit_bm = 0.01
+    co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
     max_co2_emissions = 100  # kg CO2
     
@@ -331,9 +355,16 @@ def pyomomodel():
     model.heat_production = Var(model.HOURS, within=NonNegativeReals)
     model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals)
     model.energy_ratio = Var(within=NonNegativeReals, bounds=(0.1, 0.9))
-
+    
     model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
     model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
+
+
+    # Fuel variables
+    model.FUELS = Set(initialize=['natural_gas', 'hydrogen', 'biomass'])
+    model.fuel_blend_ng = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
+    model.fuel_blend_h2 = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
+    model.fuel_blend_biomass = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
 
     # Plant Supply and Useful Energy
     model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals)
@@ -370,9 +401,16 @@ def pyomomodel():
     model.emissions_difference = Var(model.INTERVALS, domain=Reals)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
 
-    model.below_cap = Var(model.INTERVALS, domain=Binary)
-    model.above_cap = Var(model.INTERVALS, domain=Binary)
 
+
+    # Auxiliary Variables for Linearization
+    model.Z_e = Var(model.HOURS, within=NonNegativeReals)
+    model.Z_t = Var(model.HOURS, within=NonNegativeReals)
+    model.Y_h = Var(model.HOURS, within=NonNegativeReals)
+
+    #linearizing efficiency
+    model.X_e = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))  # Electrical
+    model.X_t = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))  # Thermal
  # -------------- Constraints --------------
     # ======== Heat-Related Constraints ========
 
@@ -413,10 +451,21 @@ def pyomomodel():
         return model.electricity_over_production[h] == model.electricity_production[h] - model.useful_elec[h] + model.purchased_electricity[h]
     model.elec_over_production_constraint = Constraint(model.HOURS, rule=elec_over_production_rule)
 
-    # Energy Ratio
-    def energy_ratio_rule(model, h):
-        return (model.electricity_production[h] / model.electrical_efficiency[h]) / (model.heat_production[h] / model.thermal_efficiency[h]) == model.energy_ratio
-    model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
+    # Energy Ratio Linearized
+    def energy_ratio_linearized_rule(model, h):
+        return model.Z_e[h] == model.energy_ratio * model.Z_t[h]
+    model.energy_ratio_linearized_constraint = Constraint(model.HOURS, rule=energy_ratio_linearized_rule)
+
+    # Definition of Z_e
+    def Z_e_definition_rule(model, h):
+        return model.Z_e[h] * model.electrical_efficiency[h] == model.electricity_production[h]
+    model.Z_e_definition_constraint = Constraint(model.HOURS, rule=Z_e_definition_rule)
+
+    # Definition of Z_t
+    def Z_t_definition_rule(model, h):
+        return model.Z_t[h] * model.thermal_efficiency[h] == model.heat_production[h]
+    model.Z_t_definition_constraint = Constraint(model.HOURS, rule=Z_t_definition_rule)
+
 
     # ======== CHP and Fuel-Related Constraints ========
 
@@ -425,20 +474,46 @@ def pyomomodel():
         return model.CHP_capacity >= (model.heat_production[h] + model.heat_stored[h]) * 1.2
     model.capacity_constraint = Constraint(model.HOURS, rule=capacity_rule)
 
-    # Fuel Consumption
-    def fuel_consumed_rule(model, h):
-        return fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio) == model.heat_production[h] * model.thermal_efficiency[h]
-    model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
+    # Fuel Consumption Linearized
+    def fuel_consumed_linearized_rule1(model, h):
+        return model.Y_h[h] == fuel_energy * model.fuel_consumed[h] * (1 - model.energy_ratio)
+    model.fuel_consumed_linearized_constraint1 = Constraint(model.HOURS, rule=fuel_consumed_linearized_rule1)
 
-    # Electrical Efficiency Constraint
-    def electrical_efficiency_rule(model, h):
-        return model.electrical_efficiency[h] == 0.25 + 0.025 * (model.electricity_production[h] / model.CHP_capacity) + 0.001 * TEMP 
-    model.electrical_efficiency_constraint = Constraint(model.HOURS, rule=electrical_efficiency_rule)
+    def fuel_consumed_linearized_rule2(model, h):
+        return model.Y_h[h] * model.thermal_efficiency[h] == model.heat_production[h]
+    model.fuel_consumed_linearized_constraint2 = Constraint(model.HOURS, rule=fuel_consumed_linearized_rule2)
 
-    # Thermal Efficiency Constraint
-    def thermal_efficiency_rule(model, h):
-        return model.thermal_efficiency[h] == 0.2 + 0.05 * (model.heat_production[h] / model.CHP_capacity) + 0.001 * TEMP 
-    model.thermal_efficiency_constraint = Constraint(model.HOURS, rule=thermal_efficiency_rule)
+# Linearized constraints for Electrical Efficiency
+    def X_e_definition_rule(model, h):
+        return model.X_e[h] * model.CHP_capacity == model.electricity_production[h]
+    model.X_e_definition = Constraint(model.HOURS, rule=X_e_definition_rule)
+
+    def electrical_efficiency_linearized_rule(model, h):
+        efficiency_adjustment = (
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["elec"][0] + ng_coeffs["elec"][1] * model.X_e[h] + ng_coeffs["elec"][2] * TEMP) +
+            model.fuel_blend_h2[h] * (h2_coeffs["elec"][0] + h2_coeffs["elec"][1] * model.X_e[h] + h2_coeffs["elec"][2] * TEMP)
+        )
+        return model.electrical_efficiency[h] == efficiency_adjustment
+    model.electrical_efficiency_linearized = Constraint(model.HOURS, rule=electrical_efficiency_linearized_rule)
+
+    # Linearized constraints for Thermal Efficiency
+    def X_t_definition_rule(model, h):
+        return model.X_t[h] * model.CHP_capacity == model.heat_production[h]
+    model.X_t_definition = Constraint(model.HOURS, rule=X_t_definition_rule)
+
+    def thermal_efficiency_linearized_rule(model, h):
+        efficiency_adjustment = (
+            (model.fuel_blend_ng[h] + model.fuel_blend_biomass[h]) * (ng_coeffs["thermal"][0] + ng_coeffs["thermal"][1] * model.X_t[h] + ng_coeffs["thermal"][2] * TEMP) +
+            model.fuel_blend_h2[h] * (h2_coeffs["thermal"][0] + h2_coeffs["thermal"][1] * model.X_t[h] + h2_coeffs["thermal"][2] * TEMP)
+        )
+        return model.thermal_efficiency[h] == efficiency_adjustment
+    model.thermal_efficiency_linearized = Constraint(model.HOURS, rule=thermal_efficiency_linearized_rule)
+
+
+    # Constraint to ensure that the sum of the fuel blend percentages equals 1.
+    def fuel_blend_rule(model, h):
+        return model.fuel_blend_ng[h] + model.fuel_blend_h2[h] + model.fuel_blend_biomass[h] == 1
+    model.fuel_blend_constraint = Constraint(model.HOURS, rule=fuel_blend_rule)
 
     # ======== Ramping Constraints ========
 
@@ -497,8 +572,14 @@ def pyomomodel():
 # ======== CO2 Constraints ========
 
     def co2_emissions_rule(model, h):
-        return model.co2_emissions[h] == co2_per_unit_fuel * model.fuel_consumed[h] + co2_per_unit_elec * model.purchased_electricity[h]
+        return model.co2_emissions[h] == (
+            co2_per_unit_ng * model.fuel_blend_ng[h] * model.fuel_consumed[h] + 
+            co2_per_unit_h2 * model.fuel_blend_h2[h] * model.fuel_consumed[h] + 
+            co2_per_unit_bm * model.fuel_blend_biomass[h] * model.fuel_consumed[h] + 
+            co2_per_unit_elec * model.purchased_electricity[h]
+        )
     model.co2_emissions_constraint = Constraint(model.HOURS, rule=co2_emissions_rule)
+
 
     def total_emissions_per_interval_rule(model, i):
         return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*intervals_time, (i+1)*intervals_time))
@@ -537,20 +618,24 @@ def pyomomodel():
 
     def objective_rule(model):
         capital_cost = capital_cost_per_kw * model.CHP_capacity
-        fuel_cost = sum(heat_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost_NG = sum(model.fuel_blend_ng[h] * NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost_H2 = sum(model.fuel_blend_h2[h] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost_BM = sum(model.fuel_blend_biomass[h] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        
+
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.1
-        return capital_cost + fuel_cost + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        return capital_cost + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
-    solver = SolverFactory("ipopt")
-    #solver.options['NonConvex'] = 2
+    solver = SolverFactory("gurobi")
+    solver.options['NonConvex'] = 2
     solver.solve(model, tee=True)
 
     return model
