@@ -306,12 +306,12 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 24
+    total_time = 365*3
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
 
-    no_intervals = 6
+    no_intervals = 3
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
@@ -607,13 +607,13 @@ def pyomomodel():
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.5
-        return capital_cost*0.01 + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        return capital_cost + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
-    solver = SolverFactory("bonmin")
+    solver = SolverFactory("ipopt")
     #solver.options['NonConvex'] = 2
     solver.solve(model, tee=True)
 

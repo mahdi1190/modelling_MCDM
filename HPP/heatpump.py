@@ -1,7 +1,35 @@
-import pandas as pd
-import math
-import numpy as np
 from pyomo.environ import *
+import pandas as pd
+import dash
+import dash_core_components as dcc
+import locale
+locale.setlocale( locale.LC_ALL, '' )
+import os
+import numpy as np
+import dash_html_components as html
+from dash import dcc, html, Input, Output, State
+from dash.dependencies import Input, Output
+# Initialize Dash app
+last_mod_time = 0
+
+demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
+markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
+
+electricity_demand = demands["elec"].to_numpy()
+heat_demand = demands["heat"].to_numpy()
+refrigeration_demand = demands["cool"].to_numpy()
+
+electricity_market = markets["elec"].to_numpy()
+electricity_market_sold = markets["elec_sold"].to_numpy()
+
+carbon_market = markets["carbon"].to_numpy() / 1000
+
+NG_market = markets["nat_gas"].to_numpy()
+heat_market_sold = markets["nat_gas_sold"].to_numpy()
+
+H2_market = markets["hydrogen"].to_numpy()
+
+BM_market = markets["biomass"].to_numpy()
 
 stream_energy = 11 #MW
 
@@ -40,7 +68,7 @@ def run_model(inital_data, sheet_name):
     model.Constraint2 = Constraint(rule = Constraint2_Rule, doc = 'Minimum Temperature Difference')
 
     def Constraint3_Rule(model):
-        return model.COP == ((model.Th)/(model.Th-Tc))
+        return model.COP * (model.Th-Tc) == ((model.Th))
     model.Constraint3 = Constraint(rule = Constraint3_Rule, doc = 'Coefficient of Performance')
 
     def Constraint4_Rule(model):
@@ -52,7 +80,8 @@ def run_model(inital_data, sheet_name):
     model.Objective_Function = Objective(rule = obj_rule, sense = maximize, doc = 'Maximised Balance')
 
     from pyomo.opt import SolverFactory
-    solver = SolverFactory('baron')
+    solver = SolverFactory('gurobi')
+    solver.options['NonConvex'] = 2
 
     Solution = solver.solve(model, tee = True)
 
