@@ -82,27 +82,26 @@ def pyomomodel():
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
     total_time = 360
-    HOURS = list(range(total_time))
-    model.HOURS = Set(initialize=HOURS)
+    MONTHS = list(range(total_time))
+    model.MONTHS = Set(initialize=MONTHS)
 
-    model.PUMPS = Set(initialize=range(10))
+    model.PUMPS = Set(initialize=range(3))
     a = 1000  # Example value, adjust as needed
     b = 0.8   # Example value, adjust as needed
     c = 50    # Example value, adjust as needed
 
-    MAX_CAPACITY_PER_PUMP = 600
-    MIN_CAPACITY_PER_PUMP = 100  # Define the minimum capacity per pump
+    MAX_CAPACITY_PER_PUMP = 1000
+    MIN_CAPACITY_PER_PUMP = 200  # Define the minimum capacity per pump
     MAX_TEMP_LIFT = 90
     no_intervals = 3
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
-    model.INTERVALS = Set(initialize=INTERVALS)
 
-    waste_heat = 1000
+    waste_heat = 2100
     # -------------- New Parameters related to Heat Pumps --------------
     model.heat_pump_efficiency = Param(within=NonNegativeReals, mutable=True, default=1.0),  # Efficiency of heat pump
     model.heat_pump_cost = Param(model.PUMPS, within=NonNegativeReals, mutable=True, default=1.0) # Cost of installing a heat pump
-    model.waste_heat_available = Param(model.HOURS, within=NonNegativeReals, mutable=True, default=1.0) # Waste heat available each hour
+    model.waste_heat_available = Param(model.MONTHS, within=NonNegativeReals, mutable=True, default=1.0) # Waste heat available each hour
     model.heat_pump_capacity = Param(model.PUMPS, within=NonNegativeReals, mutable=True, default=1.0) # Maximum amount of waste heat a heat pump can recover
 
     model.Th = Var(model.PUMPS, within=Reals, doc='Maximum Temperature of hot stream for each pump')
@@ -114,28 +113,22 @@ def pyomomodel():
 
     model.heat_pump_installed = Var(model.PUMPS, within=Binary)  # Indicates if a particular heat pump is installed
     model.heat_pump_capacity_installed = Var(model.PUMPS, within=NonNegativeReals)  # Capacity of each installed heat pump
-    model.heat_pump_operation = Var(model.HOURS, model.PUMPS, within=NonNegativeReals)  # Amount of waste heat recovered by each heat pump every hour
+    model.heat_pump_operation = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Amount of waste heat recovered by each heat pump every hour
 
-    model.electricity_consumption = Var(model.HOURS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
+    model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
 
     # -------------- Constraints related to Heat Pumps --------------
-    def heat_pump_operation_rule(model, h, p):
-        return model.heat_pump_operation[h, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
-    model.heat_pump_operation_con = Constraint(model.HOURS, model.PUMPS, rule=heat_pump_operation_rule)
+    def heat_pump_operation_rule(model, m, p):
+        return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
+    model.heat_pump_operation_con = Constraint(model.MONTHS, model.PUMPS, rule=heat_pump_operation_rule)
 
     # Ensuring total installed capacity does not exceed total waste heat capacity
     def total_capacity_rule(model):
         return sum(model.heat_pump_capacity_installed[p] for p in model.PUMPS) <= waste_heat
     model.total_capacity_con = Constraint(rule=total_capacity_rule)
 
-    # Waste Heat Availability for each hour
-    def waste_heat_availability_rule(model, h):
-        return sum(model.heat_pump_operation[h, p] for p in model.PUMPS) <= waste_heat
-    model.waste_heat_availability_con = Constraint(model.HOURS, rule=waste_heat_availability_rule)
-
     def max_capacity_per_pump_rule(model, p):
         return model.heat_pump_capacity_installed[p] <= MAX_CAPACITY_PER_PUMP * model.heat_pump_installed[p]
-
     model.max_capacity_per_pump_constraint = Constraint(model.PUMPS, rule=max_capacity_per_pump_rule)
 
     def individual_COP_rule(model, p):
@@ -148,27 +141,23 @@ def pyomomodel():
 
     def cost_curve_rule(model, p):
         return model.heat_pump_cost[p] == a * model.heat_pump_capacity[p]**(-b) + c * model.Th[p]
-
     model.cost_curve = Constraint(model.PUMPS, rule=cost_curve_rule)
 
-    def electricity_to_heat_output_rule(model, h, p):
-        return model.heat_pump_operation[h, p] == model.COP[p] * model.electricity_consumption[h, p]
-    model.electricity_to_heat_output_con = Constraint(model.HOURS, model.PUMPS, rule=electricity_to_heat_output_rule)
+    def electricity_to_heat_output_rule(model, m, p):
+        return model.heat_pump_operation[m, p] == model.COP[p] * model.electricity_consumption[m, p]
+    model.electricity_to_heat_output_con = Constraint(model.MONTHS, model.PUMPS, rule=electricity_to_heat_output_rule)
 
     def min_capacity_per_pump_rule(model, p):
         return model.heat_pump_capacity_installed[p] >= MIN_CAPACITY_PER_PUMP * model.heat_pump_installed[p]
-
     model.min_capacity_per_pump_constraint = Constraint(model.PUMPS, rule=min_capacity_per_pump_rule)
 
-    heat_sold_price_per_kw = 300 # Placeholder value
+    heat_sold_price_per_kw = 37.04 # Placeholder value
     electricity_price_per_kw = 2 # Placeholder value
 
     def heat_pump_objective_rule(model):
         heat_pump_installation_cost = sum(model.heat_pump_installed[p] * model.heat_pump_cost[p] * model.heat_pump_capacity_installed[p] for p in model.PUMPS)
-        heat_recovered_benefit = sum(model.heat_pump_operation[h, p] * heat_sold_price_per_kw for h in model.HOURS for p in model.PUMPS)
-        electricity_cost = sum(model.electricity_consumption[h, p] * electricity_price_per_kw for h in model.HOURS for p in model.PUMPS)
-        
-
+        heat_recovered_benefit = sum(model.heat_pump_operation[m, p] * heat_sold_price_per_kw for m in model.MONTHS for p in model.PUMPS)
+        electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
         return heat_pump_installation_cost - heat_recovered_benefit + electricity_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
