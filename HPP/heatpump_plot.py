@@ -68,7 +68,6 @@ waste_data = df['Waste'].to_numpy()
 waste_heat = waste_data
 max_waste = max(waste_data)
 
-
 CP_hp = 2
 CP_steam = 2
 
@@ -90,10 +89,12 @@ def pyomomodel():
     b = 1   # Example value, adjust as needed
     c = 2    # Example value, adjust as needed
 
-    MAX_TEMP_LIFT = 90
+    MAX_TEMP_LIFT = {0: 90, 1: 90, 2: 90, 3: 90, 4: 90, 5: 90, 6: 100, 7: 100, 8: 100, 9: 100, 10: 100}
+    model.MAX_TEMP_LIFT = Param(model.MONTHS, initialize=MAX_TEMP_LIFT)
 
     model.Th = Var(model.PUMPS, within=NonNegativeReals, doc='Maximum Temperature of hot stream for each pump')
     model.COP = Var(model.PUMPS, within=NonNegativeReals, doc='Coefficient of Performance for each pump')
+    model.heat_pump_purchase_decision = Var(model.MONTHS, within=Binary)
 
     # -------------- New Decision Variables related to Heat Pumps --------------
     model.no_of_heat_pumps = Var(within=NonNegativeIntegers) # Number of heat pumps installed
@@ -152,7 +153,7 @@ def pyomomodel():
     def heat_pump_objective_rule(model):
         heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
         electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
-        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E4
+        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E5
         return heat_pump_installation_cost + electricity_cost + heat_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
@@ -170,7 +171,7 @@ def print_selected_heat_pumps(model):
         print(f"Heat Pump {p}: Installed = {model.heat_pump_installed[p].value}, Capacity = {model.heat_pump_capacity_installed[p].value}, Th = {(model.Th[p].value)}, COP = {model.COP[p].value}")
         for m in model.MONTHS:
             print(f"Heat Pump {model.heat_pump_operation[m, p].value} Leccy = {model.electricity_consumption[m, p].value} Temp: {model.T_after_heat_exchange[m].value}" )
-
+    print(max_waste)
 
 if __name__ == "__main__":
     model = pyomomodel()
