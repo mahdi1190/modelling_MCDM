@@ -86,7 +86,7 @@ def pyomomodel():
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
-    no_pumps = 4
+    no_pumps = 3
     model.PUMPS = Set(initialize=range(no_pumps))
     a = 1000  # Example value, adjust as needed
     b = 1   # Example value, adjust as needed
@@ -97,12 +97,11 @@ def pyomomodel():
     model.heat_pump_purchase_decision = Var(model.MONTHS, within=Binary)
 
     # -------------- New Decision Variables related to Heat Pumps --------------
-    model.no_of_heat_pumps = Var(within=NonNegativeIntegers) # Number of heat pumps installed
+    model.no_of_heat_pumps = Var(within=NonNegativeIntegers, initialize=0) # Number of heat pumps installed
 
     model.heat_pump_installed = Var(model.PUMPS, within=Binary)  # Indicates if a particular heat pump is installed
     model.heat_pump_capacity_installed = Var(model.PUMPS, within=NonNegativeReals)  # Capacity of each installed heat pump
-    model.heat_pump_operation = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Amount of waste heat recovered by each heat pump every hour
-    model.heat_pump_monthly_capacity = Param(model.MONTHS, within=NonNegativeReals, mutable=True, initialize=capacity_data) 
+    model.heat_pump_operation = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Amount of waste heat recovered by each heat pump every hour 
     model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
     
     model.T_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
@@ -110,6 +109,11 @@ def pyomomodel():
     def heat_pump_operation_rule(model, m, p):
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
     model.heat_pump_operation_con = Constraint(model.MONTHS, model.PUMPS, rule=heat_pump_operation_rule)
+
+
+    def total_pumps_rule(model):
+        return model.no_of_heat_pumps == sum(model.heat_pump_installed[p] for p in model.PUMPS)
+    model.total_pumps_con = Constraint(rule=total_pumps_rule)
 
     # Ensuring total installed capacity does not exceed total waste heat capacity
     def total_capacity_rule(model):
@@ -125,7 +129,7 @@ def pyomomodel():
     model.max_temp_lift_con = Constraint(model.PUMPS, rule=max_temp_lift_rule)
 
     def max_capacity_per_pump_rule(model, m, p):
-        return model.heat_pump_capacity_installed[p] <= model.heat_pump_monthly_capacity[m] * model.heat_pump_installed[p]
+        return model.heat_pump_capacity_installed[p] <= capacity_data[m] * model.heat_pump_installed[p]
     model.max_capacity_per_pump_constraint = Constraint(model.MONTHS, model.PUMPS, rule=max_capacity_per_pump_rule)
 
     def individual_COP_rule(model, p):
@@ -151,7 +155,7 @@ def pyomomodel():
     model.T_less_than_steam_rule_constraint = Constraint(model.MONTHS, rule=T_less_than_steam_rule)
 
     def heat_pump_objective_rule(model):
-        heat_pump_installation_cost = sum(model.heat_pump_installed[p] * 1E4 + a * model.heat_pump_capacity_installed[p]*model.heat_pump_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
+        heat_pump_installation_cost = sum(model.heat_pump_installed[p] * 1E4 + a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
         electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
         heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E4
         return heat_pump_installation_cost + electricity_cost + heat_cost
@@ -165,8 +169,8 @@ def pyomomodel():
     return model
 
 def print_selected_heat_pumps(model):
-    selected_pumps = [p for p in model.PUMPS if model.heat_pump_installed[p].value > 0.1]  # Checking for values > 0.5 to account for potential floating-point inaccuracies
-    print(f"Total number of heat pumps selected: {len(selected_pumps)}")
+    selected_pumps = model.no_of_heat_pumps.value  # Checking for values > 0.5 to account for potential floating-point inaccuracies
+    print(f"Total number of heat pumps selected: {(selected_pumps)}")
     for p in model.PUMPS:
         print(f"Heat Pump {p}: Installed = {model.heat_pump_installed[p].value}, Capacity = {model.heat_pump_capacity_installed[p].value}, Th = {(model.Th[p].value)}, COP = {model.COP[p].value}")
         for m in model.MONTHS:
