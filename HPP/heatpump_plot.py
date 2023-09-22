@@ -64,6 +64,7 @@ df = pd.read_csv(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\HPP\heat_pump_data.csv
 cost_data = df['Cost'].to_numpy()
 capacity_data = df['Capacity'].to_numpy()
 waste_data = df['Waste'].to_numpy()
+max_temp_lift_data = df['Lift'].to_numpy()
 
 waste_heat = waste_data
 max_waste = max(waste_data)
@@ -73,13 +74,15 @@ CP_steam = 2
 
 target_temp = 700
 
+MAX_TEMP_LIFT = 90
+
 def pyomomodel():
     # Create model
     model = ConcreteModel()
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 11
+    total_time = 11heat
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
@@ -88,9 +91,6 @@ def pyomomodel():
     a = 1000  # Example value, adjust as needed
     b = 1   # Example value, adjust as needed
     c = 2    # Example value, adjust as needed
-
-    MAX_TEMP_LIFT = {0: 90, 1: 90, 2: 90, 3: 90, 4: 90, 5: 90, 6: 100, 7: 100, 8: 100, 9: 100, 10: 100}
-    model.MAX_TEMP_LIFT = Param(model.MONTHS, initialize=MAX_TEMP_LIFT)
 
     model.Th = Var(model.PUMPS, within=NonNegativeReals, doc='Maximum Temperature of hot stream for each pump')
     model.COP = Var(model.PUMPS, within=NonNegativeReals, doc='Coefficient of Performance for each pump')
@@ -106,6 +106,8 @@ def pyomomodel():
     model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
     
     model.T_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
+
+    
     # -------------- Constraints related to Heat Pumps --------------
     def heat_pump_operation_rule(model, m, p):
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
