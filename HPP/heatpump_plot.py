@@ -86,16 +86,18 @@ def pyomomodel():
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
-    no_pumps = 3
+    no_pumps = 4
     model.PUMPS = Set(initialize=range(no_pumps))
     a = 1000  # Example value, adjust as needed
     b = 1   # Example value, adjust as needed
-    c = 2    # Example value, adjust as needed
+    c = 0    # Example value, adjust as needed
 
     model.Th = Var(model.PUMPS, within=NonNegativeReals, doc='Maximum Temperature of hot stream for each pump')
     model.COP = Var(model.PUMPS, within=NonNegativeReals, doc='Coefficient of Performance for each pump')
+    model.heat_pump_purchase_decision = Var(model.MONTHS, within=Binary)
 
     # -------------- New Decision Variables related to Heat Pumps --------------
+    model.no_of_heat_pumps = Var(within=NonNegativeIntegers) # Number of heat pumps installed
 
     model.heat_pump_installed = Var(model.PUMPS, within=Binary)  # Indicates if a particular heat pump is installed
     model.heat_pump_capacity_installed = Var(model.PUMPS, within=NonNegativeReals)  # Capacity of each installed heat pump
@@ -149,9 +151,9 @@ def pyomomodel():
     model.T_less_than_steam_rule_constraint = Constraint(model.MONTHS, rule=T_less_than_steam_rule)
 
     def heat_pump_objective_rule(model):
-        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
+        heat_pump_installation_cost = sum(model.heat_pump_installed[p] * 1E4 + a * model.heat_pump_capacity_installed[p]*model.heat_pump_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
         electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
-        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E5
+        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E4
         return heat_pump_installation_cost + electricity_cost + heat_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
