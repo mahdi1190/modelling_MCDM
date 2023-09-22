@@ -32,8 +32,8 @@ BM_market = markets["biomass"].to_numpy()
 stream_energy = 11 #MW
 
 steam_flow = 10000#kg/s
-stream_temperature = 400 #Kelvin
-steam_temp = 393
+stream_temperature = 373 #Kelvin
+steam_temp = 298
 Tc = stream_temperature
 Td = 20
 year_index=0
@@ -57,31 +57,22 @@ pump_cost = {p: np.random.uniform(1000, 5000) for p in heat_pumps}
 # Randomly generate the expected lifetime for each pump
 lifetime = {p: np.random.randint(3, 6) for p in heat_pumps}  # lifetime between 3 to 5 years
 
-# Randomly generate available waste heat for each chemical plant
-available_waste_heat = {c: np.random.uniform(2000, 5000) for c in chemical_plants}
 
-dummy_data = {
-    "time_periods": time_periods,
-    "heat_pumps": heat_pumps,
-    "chemical_plants": chemical_plants,
-    "electricity_cost": electricity_cost,
-    "gas_cost": gas_cost,
-    "carbon_cost": carbon_cost,
-    "heat_recovery": heat_recovery,
-    "pump_cost": pump_cost,
-    "lifetime": lifetime,
-    "available_waste_heat": available_waste_heat
-}
 
 df = pd.read_csv(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\HPP\heat_pump_data.csv")
 
 cost_data = df['Cost'].to_numpy()
 capacity_data = df['Capacity'].to_numpy()
+waste_data = df['Waste'].to_numpy()
+
+waste_heat = waste_data
+max_waste = max(waste_data)
+
 
 CP_hp = 2
 CP_steam = 2
 
-target_temp = 600
+target_temp = 700
 
 def pyomomodel():
     # Create model
@@ -101,13 +92,6 @@ def pyomomodel():
 
     MAX_TEMP_LIFT = 90
 
-    waste_heat = 5000
-    # -------------- New Parameters related to Heat Pumps --------------
-    model.heat_pump_efficiency = Param(within=NonNegativeReals, mutable=True, default=1.0),  # Efficiency of heat pump
-    model.heat_pump_cost = Param(model.PUMPS, within=NonNegativeReals, mutable=True, default=1.0) # Cost of installing a heat pump
-    model.waste_heat_available = Param(model.MONTHS, within=NonNegativeReals, mutable=True, default=1.0) # Waste heat available each hour
-    model.heat_pump_capacity = Param(model.PUMPS, within=NonNegativeReals, mutable=True, default=1.0) # Maximum amount of waste heat a heat pump can recover
-
     model.Th = Var(model.PUMPS, within=NonNegativeReals, doc='Maximum Temperature of hot stream for each pump')
     model.COP = Var(model.PUMPS, within=NonNegativeReals, doc='Coefficient of Performance for each pump')
 
@@ -121,7 +105,6 @@ def pyomomodel():
     model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
     
     model.T_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
-    model.T2_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
     # -------------- Constraints related to Heat Pumps --------------
     def heat_pump_operation_rule(model, m, p):
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
@@ -129,11 +112,11 @@ def pyomomodel():
 
     # Ensuring total installed capacity does not exceed total waste heat capacity
     def total_capacity_rule(model):
-        return sum(model.heat_pump_capacity_installed[p] for p in model.PUMPS) <= waste_heat
+        return sum(model.heat_pump_capacity_installed[p] for p in model.PUMPS) <= max_waste
     model.total_capacity_con = Constraint(rule=total_capacity_rule)
 
     def Th_greater_than_Tc_rule(model, p):
-        return model.Th[p] >= Tc + 10
+        return model.Th[p] >= Tc + 5
     model.Th_greater_Tc_constraint = Constraint(model.PUMPS, rule=Th_greater_than_Tc_rule)
 
     def max_temp_lift_rule(model, p):
@@ -152,22 +135,24 @@ def pyomomodel():
         return model.heat_pump_operation[m, p] <= model.COP[p] * model.electricity_consumption[m, p]
     model.electricity_to_heat_output_con = Constraint(model.MONTHS, model.PUMPS, rule=electricity_to_heat_output_rule)
 
+    def waste_exchange_rule(model, m):
+        return sum(model.heat_pump_operation[m, p] for p in model.PUMPS) <= waste_heat[m]
+    model.waste_exchange_con = Constraint(model.MONTHS, rule=waste_exchange_rule)
 
-
-    electricity_price_per_kw = 0 # Placeholder value
+    electricity_price_per_kw = 0.3 # Placeholder value
 
     def heat_exchange_rule(model, m):
         return CP_hp*sum(model.heat_pump_operation[m, p] for p in model.PUMPS)*(((sum(model.Th[p] for p in model.PUMPS))/no_pumps) - (steam_temp+10)) == CP_steam*steam_flow*(model.T_after_heat_exchange[m] - steam_temp)
     model.heat_exchange_con = Constraint(model.MONTHS, rule=heat_exchange_rule)
 
     def T_less_than_steam_rule(model, m):
-        return ((sum(model.Th[p] for p in model.PUMPS))/no_pumps) - model.T_after_heat_exchange[m] >= 10
+        return ((sum(model.Th[p] for p in model.PUMPS))/no_pumps) - model.T_after_heat_exchange[m] >= 5
     model.T_less_than_steam_rule_constraint = Constraint(model.MONTHS, rule=T_less_than_steam_rule)
 
     def heat_pump_objective_rule(model):
-        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)*0
+        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
         electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
-        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)
+        heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E4
         return heat_pump_installation_cost + electricity_cost + heat_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
@@ -182,7 +167,7 @@ def print_selected_heat_pumps(model):
     selected_pumps = [p for p in model.PUMPS if model.heat_pump_installed[p].value > 0.1]  # Checking for values > 0.5 to account for potential floating-point inaccuracies
     print(f"Total number of heat pumps selected: {len(selected_pumps)}")
     for p in model.PUMPS:
-        print(f"Heat Pump {p}: Installed = {model.heat_pump_installed[p].value}, Capacity = {model.heat_pump_capacity_installed[p].value}, {model.heat_pump_capacity[p].value} Cost = {model.heat_pump_cost[p].value}, Th = {(model.Th[p].value)}, COP = {model.COP[p].value}")
+        print(f"Heat Pump {p}: Installed = {model.heat_pump_installed[p].value}, Capacity = {model.heat_pump_capacity_installed[p].value}, Th = {(model.Th[p].value)}, COP = {model.COP[p].value}")
         for m in model.MONTHS:
             print(f"Heat Pump {model.heat_pump_operation[m, p].value} Leccy = {model.electricity_consumption[m, p].value} Temp: {model.T_after_heat_exchange[m].value}" )
 
