@@ -110,7 +110,6 @@ def pyomomodel():
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
     model.heat_pump_operation_con = Constraint(model.MONTHS, model.PUMPS, rule=heat_pump_operation_rule)
 
-
     def total_pumps_rule(model):
         return model.no_of_heat_pumps == sum(model.heat_pump_installed[p] for p in model.PUMPS)
     model.total_pumps_con = Constraint(rule=total_pumps_rule)
@@ -155,7 +154,7 @@ def pyomomodel():
     model.T_less_than_steam_rule_constraint = Constraint(model.MONTHS, rule=T_less_than_steam_rule)
 
     def heat_pump_objective_rule(model):
-        heat_pump_installation_cost = sum(model.heat_pump_installed[p] * 1E4 + a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS)
+        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*model.heat_pump_installed[p] for p in model.PUMPS) + model.no_of_heat_pumps * 1E4
         electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
         heat_cost = CP_hp*sum(steam_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)*1E4
         return heat_pump_installation_cost + electricity_cost + heat_cost
