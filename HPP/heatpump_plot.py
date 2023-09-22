@@ -82,7 +82,7 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 11heat
+    total_time = 11
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
@@ -94,10 +94,8 @@ def pyomomodel():
 
     model.Th = Var(model.PUMPS, within=NonNegativeReals, doc='Maximum Temperature of hot stream for each pump')
     model.COP = Var(model.PUMPS, within=NonNegativeReals, doc='Coefficient of Performance for each pump')
-    model.heat_pump_purchase_decision = Var(model.MONTHS, within=Binary)
 
     # -------------- New Decision Variables related to Heat Pumps --------------
-    model.no_of_heat_pumps = Var(within=NonNegativeIntegers) # Number of heat pumps installed
 
     model.heat_pump_installed = Var(model.PUMPS, within=Binary)  # Indicates if a particular heat pump is installed
     model.heat_pump_capacity_installed = Var(model.PUMPS, within=NonNegativeReals)  # Capacity of each installed heat pump
@@ -106,8 +104,6 @@ def pyomomodel():
     model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
     
     model.T_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
-
-    
     # -------------- Constraints related to Heat Pumps --------------
     def heat_pump_operation_rule(model, m, p):
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
