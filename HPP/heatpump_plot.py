@@ -105,7 +105,20 @@ def pyomomodel():
     model.electricity_consumption = Var(model.MONTHS, model.PUMPS, within=NonNegativeReals)  # Electricity consumption of each heat pump every hour
     
     model.T_after_heat_exchange = Var(model.MONTHS, within=NonNegativeReals)
+
+    model.pump_purchase_decision = Var(model.MONTHS, model.PUMPS, within=Binary)
+    model.pump_availability = Var(model.MONTHS, model.PUMPS, within=Binary)
+
     # -------------- Constraints related to Heat Pumps --------------
+
+    def pump_availability_rule(model, m, p):
+        if m == 0: # Special case for the first month
+            return model.pump_availability[m, p] == model.pump_purchase_decision[m, p]
+        else: # For subsequent months
+            return model.pump_availability[m, p] >= model.pump_purchase_decision[m, p] + model.pump_availability[m-1, p] - 1
+
+    model.pump_availability_con = Constraint(model.MONTHS, model.PUMPS, rule=pump_availability_rule)
+
     def heat_pump_operation_rule(model, m, p):
         return model.heat_pump_operation[m, p] <= model.heat_pump_installed[p] * model.heat_pump_capacity_installed[p]
     model.heat_pump_operation_con = Constraint(model.MONTHS, model.PUMPS, rule=heat_pump_operation_rule)
@@ -173,9 +186,8 @@ def print_selected_heat_pumps(model):
     for p in model.PUMPS:
         print(f"Heat Pump {p}: Installed = {model.heat_pump_installed[p].value}, Capacity = {model.heat_pump_capacity_installed[p].value}, Th = {(model.Th[p].value)}, COP = {model.COP[p].value}")
         for m in model.MONTHS:
-            print(f"Heat Pump {model.heat_pump_operation[m, p].value} Leccy = {model.electricity_consumption[m, p].value} Temp: {model.T_after_heat_exchange[m].value}" )
+            print(f"Heat Pump {model.heat_pump_operation[m, p].value} Leccy = {model.electricity_consumption[m, p].value} Temp: {model.T_after_heat_exchange[m].value} and: {model.pump_availability[m,p].value} or: {model.pump_purchase_decision[m, p].value}" )
     print(max_waste)
-
 if __name__ == "__main__":
     model = pyomomodel()
 
