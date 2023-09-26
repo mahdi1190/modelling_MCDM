@@ -83,13 +83,14 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 11
+    total_time = 360
+    
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
-    no_pumps = 3
+    no_pumps = 2
     model.PUMPS = Set(initialize=range(no_pumps))
-    a = 1000  # Example value, adjust as needed
+    a = 1  # Example value, adjust as needed
     b = 1   # Example value, adjust as needed
     c = 0    # Example value, adjust as needed
 
@@ -127,7 +128,6 @@ def pyomomodel():
         return model.heat_pump_operation[m, p] <= model.heat_pump_capacity_installed[p] * model.pump_availability[m, p]
     model.heat_pump_operation_con = Constraint(model.MONTHS, model.PUMPS, rule=heat_pump_operation_rule)
 
-
     def total_pumps_rule(model):
         return model.no_of_heat_pumps == sum(model.pump_purchase_decision[m, p] for p in model.PUMPS for m in model.MONTHS)
     model.total_pumps_con = Constraint(rule=total_pumps_rule)
@@ -161,7 +161,7 @@ def pyomomodel():
         return sum(model.heat_pump_operation[m, p] for p in model.PUMPS) <= waste_heat[m]
     model.waste_exchange_con = Constraint(model.MONTHS, rule=waste_exchange_rule)
 
-    electricity_price_per_kw = 0.3 # Placeholder value
+    electricity_price_per_kw = 0.03 # Placeholder value
 
     def heat_exchange_rule(model, m):
         return CP_hp*sum(model.heat_pump_operation[m, p] for p in model.PUMPS)*(((sum(model.Th[p] for p in model.PUMPS))/no_pumps) - (steam_temp+10)) == CP_steam*steam_flow*(model.T_after_heat_exchange[m] - steam_temp)
@@ -172,15 +172,17 @@ def pyomomodel():
     model.T_less_than_steam_rule_constraint = Constraint(model.MONTHS, rule=T_less_than_steam_rule)
 
     def heat_pump_objective_rule(model):
-        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] + c*model.Th[p]*sum(model.pump_purchase_decision[m, p] for m in model.MONTHS) for p in model.PUMPS for m in model.MONTHS) + model.no_of_heat_pumps * 1E4
-        electricity_cost = sum(model.electricity_consumption[m, p] * electricity_price_per_kw for m in model.MONTHS for p in model.PUMPS)
-        heat_cost = CP_hp*sum(target_temp - model.T_after_heat_exchange[m] for m in model.MONTHS)
-        return heat_pump_installation_cost*0 + electricity_cost*0 + heat_cost
+        heat_pump_installation_cost = sum(a * model.heat_pump_capacity_installed[p] for p in model.PUMPS for m in model.MONTHS) + model.no_of_heat_pumps * 1E2
+        electricity_cost = sum(model.electricity_consumption[m, p] * electricity_market[m*12] for m in model.MONTHS for p in model.PUMPS)
+        heat_cost = sum((target_temp - model.T_after_heat_exchange[m]) * NG_market[m*12] for m in model.MONTHS)*1000
+        return heat_pump_installation_cost + electricity_cost + heat_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
+    solver.options['TimeLimit'] = 60
+    solver.options["Threads"]= 16
     solver.solve(model, tee=True)
 
     return model
