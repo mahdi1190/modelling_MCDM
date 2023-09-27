@@ -161,8 +161,6 @@ def pyomomodel():
         return sum(model.heat_pump_operation[m, p] for p in model.PUMPS) <= waste_heat[m]
     model.waste_exchange_con = Constraint(model.MONTHS, rule=waste_exchange_rule)
 
-    electricity_price_per_kw = 0.03 # Placeholder value
-
     def heat_exchange_rule(model, m):
         return CP_hp*sum(model.heat_pump_operation[m, p] for p in model.PUMPS)*(((sum(model.Th[p] for p in model.PUMPS))/no_pumps) - (steam_temp+10)) == CP_steam*steam_flow*(model.T_after_heat_exchange[m] - steam_temp)
     model.heat_exchange_con = Constraint(model.MONTHS, rule=heat_exchange_rule)
@@ -178,11 +176,15 @@ def pyomomodel():
         return heat_pump_installation_cost + electricity_cost + heat_cost
     model.objective = Objective(rule=heat_pump_objective_rule, sense=minimize)
 
+
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi")
-    solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = 60
-    solver.options["Threads"]= 16
+    solvere="gurobi"
+    solver = SolverFactory(solvere)
+    if solvere == "gurobi":
+        solver.options['NonConvex'] = 2
+        solver.options['TimeLimit'] = 60
+        solver.options["Threads"]= 16
+        solver.options["LPWarmStart "]= 2
     solver.solve(model, tee=True)
 
     return model
