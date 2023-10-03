@@ -38,27 +38,6 @@ Tc = stream_temperature
 Td = 20
 year_index=0
 
-# Define dummy data
-time_periods = np.arange(1, 6)  # considering 5 time periods
-heat_pumps = np.arange(1, 4)  # considering 3 different types of heat pumps
-chemical_plants = np.arange(1, 4)  # considering 3 different chemical plants
-
-# Randomly generate costs for electricity, gas, and carbon for each time period
-electricity_cost = {t: np.random.uniform(50, 100) for t in time_periods}
-gas_cost = {t: np.random.uniform(20, 50) for t in time_periods}
-carbon_cost = {t: np.random.uniform(10, 30) for t in time_periods}
-
-# Randomly generate heat recovery for each pump and plant combination
-heat_recovery = {(p, c): np.random.uniform(500, 1000) for p in heat_pumps for c in chemical_plants}
-
-# Randomly generate cost for each heat pump
-pump_cost = {p: np.random.uniform(1000, 5000) for p in heat_pumps}
-
-# Randomly generate the expected lifetime for each pump
-lifetime = {p: np.random.randint(3, 6) for p in heat_pumps}  # lifetime between 3 to 5 years
-
-
-
 df = pd.read_csv(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\HPP\heat_pump_data.csv")
 
 cost_data = df['Cost'].to_numpy()

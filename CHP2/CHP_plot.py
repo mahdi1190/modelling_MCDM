@@ -613,8 +613,8 @@ def pyomomodel():
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
-    solver = SolverFactory("ipopt")
-    #solver.options['NonConvex'] = 2
+    solver = SolverFactory("gurobi")
+    solver.options['NonConvex'] = 2
     solver.solve(model, tee=True)
 
     return model
