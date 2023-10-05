@@ -16,7 +16,7 @@ markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xl
 
 carbon_market = markets["carbon"].to_numpy()/1000
 
-max_co2_emissions = 18000
+max_co2_emissions = 500
 
 co2_data = df['co2'].to_numpy()
 production_data = df['co2'].to_numpy()
@@ -172,12 +172,17 @@ def pyomomodel():
         return model.total_emissions_per_interval[i] - max_co2_emissions <= M * model.below_cap[i]
     model.below_cap_con = Constraint(model.INTERVALS, rule=below_cap_rule)
 
+    def force_0_rule(model, i):
+        if i == 0:
+            return model.credits_used_to_offset[i] == 0
+        return Constraint.Skip
+    model.force_0_rule_con = Constraint(model.INTERVALS, rule=force_0_rule)
     # -------------- Objective Function --------------
     def ccs_objective_rule(model):
         capital_cost = (3000 + 20 * model.CCS_capacity) * sum(model.ccs_investment_decision[t] for t in model.TIME_PERIODS)
         operating_cost = sum(model.ccs_investment_decision[t] * model.co2_emissions[t] * 1000 for t in model.TIME_PERIODS)
         carbon_cost = sum((model.carbon_credits[i]) * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.1
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.5
         return (operating_cost + capital_cost + carbon_cost) - carbon_sold 
     model.objective = Objective(rule=ccs_objective_rule, sense=minimize)
 

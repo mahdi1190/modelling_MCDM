@@ -306,7 +306,7 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 365*3
+    total_time = 72
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
@@ -344,7 +344,7 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 0  # kg CO2
+    max_co2_emissions = 13000  # kg CO2
     
 
     # -------------- Decision Variables --------------
@@ -615,6 +615,9 @@ def pyomomodel():
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
+    solver.options['TimeLimit'] = 30
+    solver.options["Threads"]= 16
+    solver.options["LPWarmStart "] = 2
     solver.solve(model, tee=True)
 
     return model
