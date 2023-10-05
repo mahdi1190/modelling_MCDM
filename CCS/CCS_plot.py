@@ -142,30 +142,30 @@ def pyomomodel():
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
     def carbon_credits_needed_rule(model, i):
-        return model.carbon_credits[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
+        return model.carbon_credits[i] + model.credits_used_to_offset[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
     model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
 
     def carbon_credits_earned_rule(model, i):
         if i == 0:
             return model.credits_earned[i] == 0  # For the first interval
-        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i]) * (1 - model.below_cap[i])
+        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i] + model.credits_used_to_offset[i]) * (1 - model.below_cap[i])
     model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
 
     def carbon_credits_purchased_rule(model, i):
-        return model.carbon_credits[i] <= M * model.below_cap[i]
+        return model.carbon_credits[i] + model.credits_used_to_offset[i] <= M * model.below_cap[i]
     model.carbon_credits_purchased_con = Constraint(model.INTERVALS, rule=carbon_credits_purchased_rule)
 
     # Ensure credits_unheld doesn't exceed credits earned and previously held
     def credits_unheld_limit_rule(model, i):
         if i == 0:
             return model.credits_sold[i] == 0  # For the first interval
-        return model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i]
+        return model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_used_to_offset[i]
     model.credits_unheld_limit = Constraint(model.INTERVALS, rule=credits_unheld_limit_rule)
 
     def credits_held_dynamics_rule(model, i):
         if i == 0:
             return model.credits_held[i] == model.credits_earned[i] # For the first interval
-        return model.credits_held[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i]
+        return model.credits_held[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i] - model.credits_used_to_offset[i]
     model.credits_held_dynamics = Constraint(model.INTERVALS, rule=credits_held_dynamics_rule)
 
     def below_cap_rule(model, i):
