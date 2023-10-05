@@ -100,7 +100,7 @@ def pyomomodel():
     TIME_PERIODS = list(range(total_time))
     model.TIME_PERIODS = Set(initialize=TIME_PERIODS)
 
-
+    M = 1E5
     no_intervals = 30
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
@@ -116,13 +116,12 @@ def pyomomodel():
     model.co2_emissions = Var(model.TIME_PERIODS, within=NonNegativeReals)
     # Additional decision variables as needed.
     model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_earned = Var(model.INTERVALS, domain=Reals)
     model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
     model.credits_held = Var(model.INTERVALS, within=NonNegativeReals)
     model.credits_unheld = Var(model.INTERVALS, within=NonNegativeReals)
-    model.emissions_difference = Var(model.INTERVALS, within=NonNegativeReals)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
+    model.below_cap = Var(model.INTERVALS, within=Binary)
 
     # -------------- Constraints --------------
     # Define constraints related to CCS size, carbon capture, investment decision, etc.
@@ -143,40 +142,42 @@ def pyomomodel():
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
     def carbon_credits_needed_rule(model, i):
-        return model.carbon_credits[i] + model.credits_used_to_offset[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
+        return model.carbon_credits[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
     model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
-
-    def carbon_credits_limit_rule(model, i):
-        return model.carbon_credits[i] <= model.total_emissions_per_interval[i] - model.credits_earned[i]
-    model.carbon_credits_limit_constraint = Constraint(model.INTERVALS, rule=carbon_credits_limit_rule)
 
     def carbon_credits_earned_rule(model, i):
         if i == 0:
             return model.credits_earned[i] == 0  # For the first interval
-        return model.credits_earned[i] == model.carbon_credits[i] - model.total_emissions_per_interval[i] + max_co2_emissions + model.credits_used_to_offset[i]
+        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i]) * (1 - model.below_cap[i])
     model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
+
+    def carbon_credits_purchased_rule(model, i):
+        return model.carbon_credits[i] <= M * model.below_cap[i]
+    model.carbon_credits_purchased_con = Constraint(model.INTERVALS, rule=carbon_credits_purchased_rule)
 
     # Ensure credits_unheld doesn't exceed credits earned and previously held
     def credits_unheld_limit_rule(model, i):
         if i == 0:
-            return model.credits_sold[i] <= model.credits_earned[i]  # For the first interval
-        return model.credits_sold[i] + model.credits_used_to_offset[i] <= model.credits_held[i - 1] + model.credits_earned[i]
+            return model.credits_sold[i] == 0  # For the first interval
+        return model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i]
     model.credits_unheld_limit = Constraint(model.INTERVALS, rule=credits_unheld_limit_rule)
 
     def credits_held_dynamics_rule(model, i):
         if i == 0:
-            return model.credits_held[i] == model.credits_earned[i] - model.credits_used_to_offset[i]  # For the first interval
-        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i] - model.credits_used_to_offset[i]
+            return model.credits_held[i] == model.credits_earned[i] # For the first interval
+        return model.credits_held[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i]
     model.credits_held_dynamics = Constraint(model.INTERVALS, rule=credits_held_dynamics_rule)
 
-
+    def below_cap_rule(model, i):
+        return model.total_emissions_per_interval[i] - max_co2_emissions <= M * model.below_cap[i]
+    model.below_cap_con = Constraint(model.INTERVALS, rule=below_cap_rule)
 
     # -------------- Objective Function --------------
     def ccs_objective_rule(model):
         capital_cost = (3000 + 20 * model.CCS_capacity) * sum(model.ccs_investment_decision[t] for t in model.TIME_PERIODS)
         operating_cost = sum(model.ccs_investment_decision[t] * model.co2_emissions[t] * 1000 for t in model.TIME_PERIODS)
         carbon_cost = sum((model.carbon_credits[i]) * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.01
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.1
         return (operating_cost + capital_cost + carbon_cost) - carbon_sold 
     model.objective = Objective(rule=ccs_objective_rule, sense=minimize)
 
