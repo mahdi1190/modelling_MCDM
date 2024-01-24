@@ -18,7 +18,6 @@ markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xl
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
-
 electricity_market = markets["elec"].to_numpy()
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
@@ -123,7 +122,7 @@ def update_graphs(n_intervals):
     global last_mod_time  # Declare as global to modify it
 
     # Check last modification time of the model file
-    current_mod_time = os.path.getmtime(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP2\CHP_plot.py")
+    current_mod_time = os.path.getmtime(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP\CHP_plot.py")
 
     if current_mod_time > last_mod_time:
         last_mod_time = current_mod_time  # Update last modification time
@@ -306,12 +305,12 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 72
+    total_time = 24
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
 
-    no_intervals = 3
+    no_intervals = 4
     intervals_time = int(total_time / no_intervals)
     INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
@@ -344,8 +343,8 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 13000  # kg CO2
-    
+    max_co2_emissions = 5000  # kg CO2
+    M = max_co2_emissions*1E3
 
     # -------------- Decision Variables --------------
 
@@ -403,6 +402,7 @@ def pyomomodel():
 
     model.hydrogen_used = Var(model.HOURS, within=Binary)
     model.hydrogen_ever_used = Var(within=Binary)
+    model.below_cap = Var(model.INTERVALS, within=Binary)
 
     model.x_e = Var(model.HOURS, within=NonNegativeReals)  # Assuming the ratio is always non-negative.
 
@@ -563,39 +563,46 @@ def pyomomodel():
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
     def carbon_credits_needed_rule(model, i):
-        return model.carbon_credits[i] + model.credits_used_to_offset[i] + model.credits_sold[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
+        return model.carbon_credits[i] + model.credits_used_to_offset[i] >= model.total_emissions_per_interval[i] - max_co2_emissions
     model.carbon_credits_needed_constraint = Constraint(model.INTERVALS, rule=carbon_credits_needed_rule)
-
-    def carbon_credits_limit_rule(model, i):
-        return model.carbon_credits[i] <= model.total_emissions_per_interval[i] - model.credits_earned[i] 
-    model.carbon_credits_limit_constraint = Constraint(model.INTERVALS, rule=carbon_credits_limit_rule)
 
     def carbon_credits_earned_rule(model, i):
         if i == 0:
             return model.credits_earned[i] == 0  # For the first interval
-        return model.credits_earned[i] == model.carbon_credits[i] - model.total_emissions_per_interval[i] + max_co2_emissions
+        return model.credits_earned[i] == (max_co2_emissions - model.total_emissions_per_interval[i] + model.credits_used_to_offset[i]) * (1 - model.below_cap[i])
     model.carbon_credits_earned_constraint = Constraint(model.INTERVALS, rule=carbon_credits_earned_rule)
+
+    def carbon_credits_purchased_rule(model, i):
+        return model.carbon_credits[i] + model.credits_used_to_offset[i] <= M * model.below_cap[i]
+    model.carbon_credits_purchased_con = Constraint(model.INTERVALS, rule=carbon_credits_purchased_rule)
 
     # Ensure credits_unheld doesn't exceed credits earned and previously held
     def credits_unheld_limit_rule(model, i):
         if i == 0:
-            return model.credits_used_to_offset[i] + model.credits_sold[i] <= model.credits_earned[i]  # For the first interval
-        return model.credits_used_to_offset[i] + model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i]
+            return model.credits_sold[i] == 0  # For the first interval
+        return model.credits_sold[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_used_to_offset[i]
     model.credits_unheld_limit = Constraint(model.INTERVALS, rule=credits_unheld_limit_rule)
 
-    # Dynamics of credits held
     def credits_held_dynamics_rule(model, i):
         if i == 0:
-            return model.credits_held[i] == 0  # For the first interval
-        return model.credits_held[i] == model.credits_held[i - 1] + model.credits_earned[i] - model.credits_used_to_offset[i] - model.credits_sold[i]
+            return model.credits_held[i] == model.credits_earned[i] # For the first interval
+        return model.credits_held[i] <= model.credits_held[i - 1] + model.credits_earned[i] - model.credits_sold[i] - model.credits_used_to_offset[i]
     model.credits_held_dynamics = Constraint(model.INTERVALS, rule=credits_held_dynamics_rule)
 
+    def below_cap_rule(model, i):
+        return model.total_emissions_per_interval[i] - max_co2_emissions <= M * model.below_cap[i]
+    model.below_cap_con = Constraint(model.INTERVALS, rule=below_cap_rule)
+
+    def force_0_rule(model, i):
+        if i == 0:
+            return model.credits_used_to_offset[i] == 0
+        return Constraint.Skip
+    model.force_0_rule_con = Constraint(model.INTERVALS, rule=force_0_rule)
 
     # -------------- Objective Function --------------
 
     def objective_rule(model):
-        capital_cost = capital_cost_per_kw * model.CHP_capacity 
-        capital_cost = 3000 + 20 * model.CHP_capacity  - 0.5 * TEMP + 0.01 * model.CHP_capacity **2 + 0.001 * TEMP**2 - 0.02 * model.CHP_capacity  * TEMP
+        capital_cost = 3000 + 20 * model.CHP_capacity  - 0.5 * TEMP + 0.01 * model.CHP_capacity **2 + 0.001 * TEMP - 0.02 * model.CHP_capacity  * TEMP
 
         fuel_cost_NG = sum(model.fuel_blend_ng[h] * NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         fuel_cost_H2 = sum(model.fuel_blend_h2[h] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS)
@@ -606,8 +613,8 @@ def pyomomodel():
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.5
-        return capital_cost + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
+        return capital_cost*0 + (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
@@ -615,7 +622,7 @@ def pyomomodel():
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = 30
+    solver.options['TimeLimit'] = 200
     solver.options["Threads"]= 16
     solver.options["LPWarmStart "] = 2
     solver.solve(model, tee=True)

@@ -161,7 +161,7 @@ def pyomomodel():
     solver = SolverFactory(solvere)
     if solvere == "gurobi":
         solver.options['NonConvex'] = 2
-        solver.options['TimeLimit'] = 60
+        solver.options['TimeLimit'] = 10
         solver.options["Threads"]= 16
         solver.options["LPWarmStart "]= 2
     solver.solve(model, tee=True)
