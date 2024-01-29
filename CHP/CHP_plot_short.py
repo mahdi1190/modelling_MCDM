@@ -306,7 +306,7 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 336
+    total_time = 360
     HOURS = list(range(total_time))
     model.HOURS = Set(initialize=HOURS)
 
