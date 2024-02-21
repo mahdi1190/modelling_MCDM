@@ -14,6 +14,8 @@ last_mod_time = 0
 
 demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
+markets_monthly = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets_monthly.xlsx")
+
 
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
@@ -24,6 +26,8 @@ electricity_market_sold = markets["elec_sold"].to_numpy()
 carbon_market = markets["carbon"].to_numpy() / 1000
 
 NG_market = markets["nat_gas"].to_numpy()
+NG_market_monthly = markets_monthly["nat_gas"].to_numpy()
+
 heat_market_sold = markets["nat_gas_sold"].to_numpy()
 
 H2_market = markets["hydrogen"].to_numpy()
@@ -121,14 +125,24 @@ def update_graph_height(height_value):
 
 def update_graphs(n_intervals):
     global last_mod_time  # Declare as global to modify it
+    model = pyomomodel()
+    for m in range(10):
+        print(f"Month: {m}")
 
+        for c in range(3):
+            initiated = value(model.ContractInitiated[c, m])
+            active = value(model.ContractActive[m, c])
+            amount = value(model.ContractAmount[m, c])
+            price = value(model.ContractPrice[m, c])
+            duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
+            print(f"  Contract {c}: Initiated: {initiated}, Active: {active}, Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
+        print("\n")
     # Check last modification time of the model file
     current_mod_time = os.path.getmtime(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP\CHP_plot.py")
 
     if current_mod_time > last_mod_time:
         last_mod_time = current_mod_time  # Update last modification time
 
-        model = pyomomodel()
         hours_list = list(model.HOURS)
         intervals_list = list(model.INTERVALS)
 
@@ -168,6 +182,7 @@ def update_graphs(n_intervals):
         blend_ng = [model.fuel_blend_ng[h]() for h in intervals_list]
         blend_bm = [model.fuel_blend_biomass[h]() for h in intervals_list]
         # Create figures based on these results
+
 
         base_layout_template = {
             'template': 'plotly_dark',
@@ -306,16 +321,20 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 360
-    HOURS = list(range(total_time))
+    total_time = 15
+    HOURS = np.arange(total_time)
     model.HOURS = Set(initialize=HOURS)
 
+    MONTHS = np.arange(total_time)
+    model.MONTHS = Set(initialize=MONTHS)
 
     no_intervals = 4
     intervals_time = int(total_time / no_intervals)
-    INTERVALS = list(range(no_intervals))  # Four 6-hour intervals in a day
+    INTERVALS = np.arange(no_intervals)  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
 
+    no_contracts = 20
+    model.CONTRACTS = Set(initialize=range(no_contracts))
 
     # Storage
     storage_efficiency = 0.7 # %
@@ -401,14 +420,58 @@ def pyomomodel():
     model.credits_unheld = Var(model.INTERVALS, within=NonNegativeReals)
     model.emissions_difference = Var(model.INTERVALS, domain=Reals)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
-
-    model.hydrogen_used = Var(model.HOURS, within=Binary)
-    model.hydrogen_ever_used = Var(within=Binary)
     model.below_cap = Var(model.INTERVALS, within=Binary)
 
-    model.x_e = Var(model.HOURS, within=NonNegativeReals)  # Assuming the ratio is always non-negative.
+    # Fixed-price contract
+
+    # Indicates if a contract is initiated in a specific month
+    model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
+    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers)
+    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals)
+
+    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals)
+
+    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
 
  # -------------- Constraints --------------
+    def contract_duration_rule(model, c):
+        return sum(model.ContractActive[m, c] for m in model.MONTHS) == model.ContractDuration[c]
+    model.ContractDurationCon = Constraint(model.CONTRACTS, rule=contract_duration_rule)
+
+        # Constraint to link ContractActive with ContractStart
+    def contract_start_rule(model, m, c):
+        if m == 0:
+            return model.ContractActive[m, c] <= model.ContractStart[m, c]
+        else:
+            return model.ContractActive[m, c] <= model.ContractActive[m-1, c] + model.ContractStart[m, c]
+    model.ContractStartCon = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_start_rule)
+
+    def contract_maximum_duration_rule(model, c):
+        # Ensures that the duration of each contract is at least 3 months
+        return model.ContractDuration[c] <= 12
+    model.ContractMaximumDurationCon = Constraint(model.CONTRACTS, rule=contract_maximum_duration_rule)
+
+    # Ensure that the sum of ContractStart for each contract equals 1
+    def contract_single_start_rule(model, c):
+        return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
+    model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
+
+    def contract_price_setting_rule(model, m, c):
+        # This will iterate over each contract-month pair and set the contract price
+        # based on the month the contract is initiated.
+        # It uses a sum over all months up to 'm' to find the initiation month's price
+        # and applies it to the contract price for that month.
+        return model.ContractPrice[m, c] == sum(NG_market_monthly[mo] * model.ContractStart[mo, c] for mo in model.MONTHS if mo <= m)
+    model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
+
+    def min_fulfillment_rule(model, m, c):
+        return model.ContractAmount[m, c] >= 100 * model.ContractActive[m, c]
+    model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
+
+    def demand_fulfillment_rule(model, m):
+        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= heat_demand[m]
+    model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
+    
     # ======== Heat-Related Constraints ========
 
     # Heat Balance
@@ -605,17 +668,16 @@ def pyomomodel():
 
     def objective_rule(model):
 
-        fuel_cost_NG = sum(model.fuel_blend_ng[h] * NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
-        fuel_cost_H2 = sum(model.fuel_blend_h2[h] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS)
-        fuel_cost_BM = sum(model.fuel_blend_biomass[h] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS)
-        
+        fuel_cost_NG = sum(model.ContractAmount[m, c] * model.ContractPrice[m, c] for m in model.MONTHS for c in model.CONTRACTS)
+
+        duration_penalty = sum(model.ContractDuration[c] for c in model.CONTRACTS)
 
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
-        return (fuel_cost_NG + fuel_cost_BM + fuel_cost_H2) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        return fuel_cost_NG + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
@@ -630,6 +692,19 @@ def pyomomodel():
 
     return model
 
+
 # Run the Dash app
 if __name__ == '__main__':
+    model = pyomomodel()
+    for m in range(15):
+        print(f"Month: {m}")
+
+        for c in range(4):
+            active = value(model.ContractActive[m, c])
+            amount = value(model.ContractAmount[m, c])
+            price = value(model.ContractPrice[m, c])
+            duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
+            print(f"  Contract {c}: Active: {active}, Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
+        print("\n")
     app.run_server(debug=True)
+    # Iterate through each month and contract
