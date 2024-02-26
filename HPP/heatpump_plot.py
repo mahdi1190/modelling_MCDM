@@ -67,7 +67,7 @@ def pyomomodel():
     MONTHS = list(range(total_time))
     model.MONTHS = Set(initialize=MONTHS)
 
-    no_pumps = 3
+    no_pumps = 10
     model.PUMPS = Set(initialize=range(no_pumps))
     a = 1  # Example value, adjust as needed
     b = 1   # Example value, adjust as needed

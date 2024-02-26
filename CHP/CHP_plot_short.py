@@ -301,19 +301,10 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+total_hours = 24
+total_times = 60
+no_contract = 20
+bound_duration = 60
 # Create a simple model
 def pyomomodel():
     # Create model
@@ -321,20 +312,20 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = 15
-    HOURS = np.arange(total_time)
+    total_time = total_times
+    HOURS = np.arange(total_hours)
     model.HOURS = Set(initialize=HOURS)
 
     MONTHS = np.arange(total_time)
     model.MONTHS = Set(initialize=MONTHS)
 
     no_intervals = 4
-    intervals_time = int(total_time / no_intervals)
+    intervals_time = int(total_hours / no_intervals)
     INTERVALS = np.arange(no_intervals)  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
 
-    no_contracts = 20
-    model.CONTRACTS = Set(initialize=range(no_contracts))
+    no_contracts = np.arange(no_contract)
+    model.CONTRACTS = Set(initialize=range(no_contract))
 
     # Storage
     storage_efficiency = 0.7 # %
@@ -426,12 +417,13 @@ def pyomomodel():
 
     # Indicates if a contract is initiated in a specific month
     model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
-    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers)
-    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals)
+    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration), initialize=0)
+    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
 
-    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals)
+    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals)
 
-    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
+    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
 
  # -------------- Constraints --------------
     def contract_duration_rule(model, c):
@@ -446,26 +438,23 @@ def pyomomodel():
             return model.ContractActive[m, c] <= model.ContractActive[m-1, c] + model.ContractStart[m, c]
     model.ContractStartCon = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_start_rule)
 
-    def contract_maximum_duration_rule(model, c):
-        # Ensures that the duration of each contract is at least 3 months
-        return model.ContractDuration[c] <= 12
-    model.ContractMaximumDurationCon = Constraint(model.CONTRACTS, rule=contract_maximum_duration_rule)
-
     # Ensure that the sum of ContractStart for each contract equals 1
     def contract_single_start_rule(model, c):
         return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
     model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
 
+    # Constraint to set the start price based on the contract's start month
+    def set_contract_start_price_rule(model, c):
+        return model.ContractStartPrice[c] == sum(NG_market_monthly[m] * model.ContractStart[m, c] for m in model.MONTHS)
+    model.SetContractStartPrice = Constraint(model.CONTRACTS, rule=set_contract_start_price_rule)
+
+    # Then, use this start price directly in your original constraint, simplifying it
     def contract_price_setting_rule(model, m, c):
-        # This will iterate over each contract-month pair and set the contract price
-        # based on the month the contract is initiated.
-        # It uses a sum over all months up to 'm' to find the initiation month's price
-        # and applies it to the contract price for that month.
-        return model.ContractPrice[m, c] == sum(NG_market_monthly[mo] * model.ContractStart[mo, c] for mo in model.MONTHS if mo <= m)
+        return model.ContractPrice[m, c] == model.ContractStartPrice[c]
     model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
 
     def min_fulfillment_rule(model, m, c):
-        return model.ContractAmount[m, c] >= 100 * model.ContractActive[m, c]
+        return model.ContractAmount[m, c] >= 250 * model.ContractActive[m, c]
     model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
 
     def demand_fulfillment_rule(model, m):
@@ -685,9 +674,9 @@ def pyomomodel():
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = 60
+    solver.options['TimeLimit'] = 100
     solver.options["Threads"]= 16
-    solver.options["LPWarmStart "] = 2
+    solver.options["LPWarmStart"] = 2
     solver.solve(model, tee=True)
 
     return model
@@ -696,10 +685,10 @@ def pyomomodel():
 # Run the Dash app
 if __name__ == '__main__':
     model = pyomomodel()
-    for m in range(15):
+    for m in range(total_times):
         print(f"Month: {m}")
 
-        for c in range(4):
+        for c in range(no_contract):
             active = value(model.ContractActive[m, c])
             amount = value(model.ContractAmount[m, c])
             price = value(model.ContractPrice[m, c])
