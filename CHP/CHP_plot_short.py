@@ -303,7 +303,7 @@ def update_graphs(n_intervals):
 
 total_hours = 24
 total_times = 60
-no_contract = 20
+no_contract = 35
 bound_duration = 60
 # Create a simple model
 def pyomomodel():
