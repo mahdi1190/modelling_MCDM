@@ -303,7 +303,7 @@ def update_graphs(n_intervals):
 
 total_hours = 24
 total_times = 60
-no_contract = 15
+no_contract =10
 bound_duration = 60
 # Create a simple model
 def pyomomodel():
@@ -372,7 +372,6 @@ def pyomomodel():
 
 
     # Fuel variables
-    model.FUELS = Set(initialize=['natural_gas', 'hydrogen', 'biomass'])
     model.fuel_blend_ng = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
     model.fuel_blend_h2 = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
     model.fuel_blend_biomass = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
@@ -430,7 +429,11 @@ def pyomomodel():
     model.ContractTypeIndexed = Var(model.CONTRACTS, within=Binary)
     model.ContractTypeTakeOrPay = Var(model.CONTRACTS, within=Binary)
 
+    model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
+    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
 
+    model.FUELS = Set(initialize=['natural_gas', 'hydrogen', 'electricity'])
+    model.FuelType = Var(model.HOURS, model.FUELS, within=Binary)
  # -------------- Constraints --------------
     def contract_duration_rule(model, c):
         return sum(model.ContractActive[m, c] for m in model.MONTHS) == model.ContractDuration[c]
@@ -441,9 +444,8 @@ def pyomomodel():
         return model.ContractDuration[c] >= 3 * model.ContractActive[m, c]
     model.MinContractDurationCon = Constraint(model.MONTHS, model.CONTRACTS, rule=min_contract_duration_rule)
 
-
     def contract_type_rule(model, c):
-        return model.ContractTypeFixed[c] + model.ContractTypeIndexed[c] + model.ContractTypeTakeOrPay[c] == 1
+        return sum(model.ContractType[c, t] for t in model.ContractTypes) == 1
     model.ContractTypeConstraint = Constraint(model.CONTRACTS, rule=contract_type_rule)
 
         # Constraint to link ContractActive with ContractStart
@@ -466,23 +468,28 @@ def pyomomodel():
 
     # Then, use this start price directly in your original constraint, simplifying it
     def contract_price_setting_rule(model, m, c):
-        # Example: Assume FixedPrice[c], IndexedPrice[m, c] are defined. Modify as per your data structure.
+        # This needs to be adjusted according to how prices are actually determined.
         return model.ContractPrice[m, c] == (
-            model.ContractTypeFixed[c] * model.ContractStartPrice[c] +
-            model.ContractTypeIndexed[c] * NG_market_monthly[m] +
-            model.ContractTypeTakeOrPay[c] * model.ContractStartPrice[c]  # Assuming you have a specific price for Take-or-Pay
+            model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] +
+            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] +
+            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] 
         )
     model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
 
-
     def min_fulfillment_rule(model, m, c):
-        return model.ContractAmount[m, c] >= model.ContractActive[m, c] * (300 * model.ContractTypeTakeOrPay[c] + 250 * model.ContractTypeFixed[c] + 250 * model.ContractTypeIndexed[c])
+        return model.ContractAmount[m, c] >= model.ContractActive[m, c] * (
+
+            300 * model.ContractType[c, 'TakeOrPay'] +
+            250 * (model.ContractType[c, 'Fixed'] + 
+            model.ContractType[c, 'Indexed'])
+            # Note: This assumes the same minimum for Fixed and Indexed contracts for simplicity
+        )
     model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
 
     def demand_fulfillment_rule(model, m):
         return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= heat_demand[m]
     model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
-    
+
     # ======== Heat-Related Constraints ========
 
     # Heat Balance
@@ -556,7 +563,6 @@ def pyomomodel():
         return model.thermal_efficiency[h] * CHP_capacity == efficiency_adjustment_times_CHP
 
     model.thermal_efficiency_constraint = Constraint(model.HOURS, rule=thermal_efficiency_rule)
-
 
     # Constraint to ensure that the sum of the fuel blend percentages equals 1.
     def fuel_blend_rule(model, h):
@@ -632,7 +638,6 @@ def pyomomodel():
             co2_per_unit_elec * model.purchased_electricity[h]
         )
     model.co2_emissions_constraint = Constraint(model.HOURS, rule=co2_emissions_rule)
-
 
     def total_emissions_per_interval_rule(model, i):
         return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*intervals_time, (i+1)*intervals_time))
@@ -710,19 +715,22 @@ if __name__ == '__main__':
     for m in range(total_times):
         print(f"Month: {m}")
         for c in range(no_contract):
-            fixed = value(model.ContractTypeFixed[c])
-            indexed = value(model.ContractTypeIndexed[c])
-            takeorpay = value(model.ContractTypeTakeOrPay[c])
-            if fixed == 1:
-                active = "Fixed"
-            elif takeorpay == 1:
-                active = "Take Or Pay"
-            else:
-                active = "Indexed"
+            # Determine the selected contract type for the current contract
+            selected_contract_type = None
+            for t in model.ContractTypes:
+                if value(model.ContractType[c, t]) >= 0.99:  # Assuming model.ContractTypes is your set of contract types
+                    selected_contract_type = t
+                    break
+
+            # Extract values for amount, price, and duration
             amount = value(model.ContractAmount[m, c])
             price = value(model.ContractPrice[m, c])
             duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
-            print(f"  {active} Contract {c}: Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
+            
+            # Print the details including the selected contract type
+            print(f"  {selected_contract_type} Contract {c}: Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
         print("\n")
+
+    # Assuming 'app.run_server(debug=True)' is part of your application logic to start a server
     app.run_server(debug=True)
-    # Iterate through each month and contract
+
