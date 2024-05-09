@@ -74,6 +74,7 @@ def update_graphs(n_intervals):
             'yaxis': {'title': 'No of Credits'},
             'title': 'Carbon Credit Dynamics',
             'title_font': {'size': 24, 'family': 'Arial, sans-serif', 'weight': 'bold'},
+            'showlegend': False,
         }
 
         carbon_credits_figure = {
@@ -96,7 +97,7 @@ def pyomomodel():
     model = ConcreteModel()
 
     # -------------- Parameters --------------
-    total_time = 3600
+    total_time = 360
     TIME_PERIODS = list(range(total_time))
     model.TIME_PERIODS = Set(initialize=TIME_PERIODS)
 

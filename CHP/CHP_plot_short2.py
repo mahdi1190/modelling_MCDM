@@ -302,9 +302,10 @@ def update_graphs(n_intervals):
         raise dash.exceptions.PreventUpdate
 
 total_hours = 24
-total_times = 60
-no_contract =10
-bound_duration = 60
+total_times = 30
+no_contract = 30
+time_limit = 300
+bound_duration = 25
 # Create a simple model
 def pyomomodel():
     # Create model
@@ -418,9 +419,17 @@ def pyomomodel():
     model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
     model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration), initialize=0)
     model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.HeatContract = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.ElecContract = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.ContractAmountElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+
+    model.ForceHeat = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.ForceElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
 
     model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
     model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals)
+    model.ContractPriceElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
+    model.ContractStartPriceElec = Var(model.CONTRACTS, within=NonNegativeReals)
 
     model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
 
@@ -431,10 +440,14 @@ def pyomomodel():
 
     model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
     model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
+    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary)
 
-    model.FUELS = Set(initialize=['natural_gas', 'hydrogen', 'electricity'])
-    model.FuelType = Var(model.HOURS, model.FUELS, within=Binary)
+    model.FUELS = Set(initialize=['natural_gas', 'electricity'])
+    model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary)
+    model.FuelTypeActive = Var(model.CONTRACTS, model.MONTHS, model.FUELS, within=Binary)
+
  # -------------- Constraints --------------
+    
     def contract_duration_rule(model, c):
         return sum(model.ContractActive[m, c] for m in model.MONTHS) == model.ContractDuration[c]
     model.ContractDurationCon = Constraint(model.CONTRACTS, rule=contract_duration_rule)
@@ -461,6 +474,10 @@ def pyomomodel():
         return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
     model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
 
+    def fuel_type_rule(model, c):
+        return sum(model.FuelType[c, f] for f in model.FUELS) == 1
+    model.FuelTypeConstraint = Constraint(model.CONTRACTS, rule=fuel_type_rule)
+
     # Constraint to set the start price based on the contract's start month
     def set_contract_start_price_rule(model, c):
         return model.ContractStartPrice[c] == sum(NG_market_monthly[m] * model.ContractStart[m, c] for m in model.MONTHS)
@@ -471,15 +488,15 @@ def pyomomodel():
         # This needs to be adjusted according to how prices are actually determined.
         return model.ContractPrice[m, c] == (
             model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] +
-            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] +
-            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] 
+            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] * 0.8 +
+            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] * 0.9
         )
     model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
 
     def min_fulfillment_rule(model, m, c):
         return model.ContractAmount[m, c] >= model.ContractActive[m, c] * (
 
-            300 * model.ContractType[c, 'TakeOrPay'] +
+            500 * model.ContractType[c, 'TakeOrPay'] +
             250 * (model.ContractType[c, 'Fixed'] + 
             model.ContractType[c, 'Indexed'])
             # Note: This assumes the same minimum for Fixed and Indexed contracts for simplicity
@@ -487,7 +504,7 @@ def pyomomodel():
     model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
 
     def demand_fulfillment_rule(model, m):
-        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= heat_demand[m]
+        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= heat_demand[m] 
     model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
 
     # ======== Heat-Related Constraints ========
@@ -506,7 +523,6 @@ def pyomomodel():
     def heat_over_production_rule(model, h):
         return model.heat_over_production[h] == model.heat_production[h] - model.useful_heat[h]
     model.heat_over_production_constraint = Constraint(model.HOURS, rule=heat_over_production_rule)
-
 
     # Useful Heat
     def useful_heat_rule(model, h):
@@ -685,15 +701,14 @@ def pyomomodel():
     def objective_rule(model):
 
         fuel_cost_NG = sum(model.ContractAmount[m, c] * model.ContractPrice[m, c] for m in model.MONTHS for c in model.CONTRACTS)
-
-        duration_penalty = sum(model.ContractDuration[c] for c in model.CONTRACTS)
+        #fuel_cost_elec = sum(model.ContractAmountElec[m, c] * model.ContractPriceElec[m, c] for m in model.MONTHS for c in model.CONTRACTS)
 
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
-        return fuel_cost_NG + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold)
+        return fuel_cost_NG + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold) #+ fuel_cost_elec
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
@@ -701,9 +716,10 @@ def pyomomodel():
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = 25
+    solver.options['TimeLimit'] = time_limit
     solver.options["Threads"]= 16
     solver.options["LPWarmStart"] = 2
+    solver.options["FuncNonlinear"] = 1
     solver.solve(model, tee=True)
 
     return model
@@ -722,14 +738,25 @@ if __name__ == '__main__':
                     selected_contract_type = t
                     break
 
+            # Determine the fuel type for the current contract
+            fuel_type = None
+            for f in model.FUELS:
+                if value(model.FuelType[c, f]) >= 0.99:
+                    fuel_type = f
+                    break
+
             # Extract values for amount, price, and duration
             amount = value(model.ContractAmount[m, c])
-            price = value(model.ContractPrice[m, c])
+            if fuel_type == "natural_gas":
+                price = value(model.ContractPrice[m, c])
+            else:
+                price = value(model.ContractPrice[m, c])
             duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
             
-            # Print the details including the selected contract type
+            # Print the details including the selected contract type and fuel type
             print(f"  {selected_contract_type} Contract {c}: Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
         print("\n")
+
 
     # Assuming 'app.run_server(debug=True)' is part of your application logic to start a server
     app.run_server(debug=True)

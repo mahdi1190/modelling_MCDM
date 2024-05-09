@@ -302,9 +302,9 @@ def update_graphs(n_intervals):
         raise dash.exceptions.PreventUpdate
 
 total_hours = 24
-total_times = 60
+total_times = 30
 no_contract = 10
-bound_duration = 60
+bound_duration = 120
 # Create a simple model
 def pyomomodel():
     # Create model
@@ -702,6 +702,7 @@ def pyomomodel():
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = 60
     solver.options["Threads"]= 16
+    solver.options["FuncNonlinear"] = 1
     solver.options["LPWarmStart"] = 2
     solver.solve(model, tee=True)
 

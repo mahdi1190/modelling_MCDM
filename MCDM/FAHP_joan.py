@@ -381,11 +381,16 @@ gci = calculate_gci(fuzzy_weights_criteria, fuzzy_consistency_vector)
 print(gci)
 
 
+#PLOTTING FROM HERE 
+
 import plotly.graph_objects as go
 import numpy as np
 
 # Colors for the bars as provided
 colors_plotly = ['#1f77b4', '#ff7f0e', '#2ca02c']
+
+
+
 
 # Data and sub-criteria labels
 data = {
