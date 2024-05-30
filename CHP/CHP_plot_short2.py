@@ -12,9 +12,9 @@ from dash.dependencies import Input, Output
 # Initialize Dash app
 last_mod_time = 0
 
-demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
-markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
-markets_monthly = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets_monthly.xlsx")
+demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx")
+markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
+markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
 
 
 electricity_demand = demands["elec"].to_numpy()
@@ -434,13 +434,13 @@ def pyomomodel():
     model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
 
     # Binary variables for contract types
-    model.ContractTypeFixed = Var(model.CONTRACTS, within=Binary)
-    model.ContractTypeIndexed = Var(model.CONTRACTS, within=Binary)
-    model.ContractTypeTakeOrPay = Var(model.CONTRACTS, within=Binary)
+    model.ContractTypeFixed = Var(model.CONTRACTS, within=Binary, initialize=1)
+    model.ContractTypeIndexed = Var(model.CONTRACTS, within=Binary, initialize=0)
+    model.ContractTypeTakeOrPay = Var(model.CONTRACTS, within=Binary, initialize=0)
 
     model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
-    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
-    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary)
+    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary, initialize=0)
+    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary, initialize=0)
 
     model.FUELS = Set(initialize=['natural_gas', 'electricity'])
     model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary)
@@ -717,7 +717,7 @@ def pyomomodel():
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 16
+    solver.options["Threads"]= 32
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
     solver.solve(model, tee=True)
