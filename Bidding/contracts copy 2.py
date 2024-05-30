@@ -28,10 +28,10 @@ BM_market = markets["biomass"].to_numpy()
 CHP_capacity = 2500
 
 total_hours = 24
-total_times = 30
-no_contract = 15
+total_times = 60
+no_contract = 30
 time_limit = 100
-bound_duration = 25
+bound_duration = 60
 
 def pyomomodel():
     # Create model
@@ -64,20 +64,20 @@ def pyomomodel():
     # Fixed-price contract
 
     # Indicates if a contract is initiated in a specific month
-    model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
-    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration), initialize=0)
-    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=1)
+    model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary)
+    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration))
+    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 5000))
+    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
+    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
+    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
 
     model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
-    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary, initialize=0)
-    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary, initialize=0)
+    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
+    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary)
 
     model.FUELS = Set(initialize=['natural_gas', 'electricity'])
-    model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary, initialize=0)
-    model.FuelTypeActive = Var(model.CONTRACTS, model.MONTHS, model.FUELS, within=Binary, initialize=0)
+    model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary)
+    model.FuelTypeActive = Var(model.CONTRACTS, model.MONTHS, model.FUELS, within=Binary)
 
  # -------------- Constraints --------------
     
@@ -163,6 +163,7 @@ def pyomomodel():
     solver.options["Threads"]= 32
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
+    solver.options['mipgap'] = 0.01
     solver.solve(model, tee=True)
 
     return model
