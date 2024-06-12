@@ -12,9 +12,9 @@ from dash.dependencies import Input, Output
 # Initialize Dash app
 last_mod_time = 0
 
-demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
-markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
-markets_monthly = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets_monthly.xlsx")
+demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx")
+markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
+markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
 
 
 electricity_demand = demands["elec"].to_numpy()
@@ -701,7 +701,7 @@ def pyomomodel():
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = 60
-    solver.options["Threads"]= 16
+    solver.options["Threads"] = 32
     solver.options["FuncNonlinear"] = 1
     solver.options["LPWarmStart"] = 2
     solver.solve(model, tee=True)

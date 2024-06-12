@@ -12,8 +12,9 @@ from dash.dependencies import Input, Output
 # Initialize Dash app
 last_mod_time = 0
 
-demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
-markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
+demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx")
+markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
+markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
 
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
@@ -122,7 +123,7 @@ def update_graphs(n_intervals):
     global last_mod_time  # Declare as global to modify it
 
     # Check last modification time of the model file
-    current_mod_time = os.path.getmtime(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP\CHP_plot.py")
+    current_mod_time = os.path.getmtime(r"C:\Users\fcp22sma\modelling_MCDM\CHP\CHP_plot.py")
 
     if current_mod_time > last_mod_time:
         last_mod_time = current_mod_time  # Update last modification time
@@ -343,9 +344,11 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 5000  # kg CO2
+    max_co2_emissions = 10000  # kg CO2
     M = max_co2_emissions*1E3
 
+    max_elec = max(electricity_demand)
+    max_heat = max(heat_demand)
     # -------------- Decision Variables --------------
 
     # CHP System Variables
@@ -377,7 +380,7 @@ def pyomomodel():
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)
 
     # Overproduction and Ramp Rate
-    model.heat_over_production = Var(model.HOURS, within=NonNegativeReals)
+    model.heat_over_production = Var(model.HOURS, within=NonNegativeReals), 
     model.electricity_over_production = Var(model.HOURS, within=NonNegativeReals)
     model.ramp_rate = Var(model.HOURS, within=NonNegativeReals)
 
@@ -622,9 +625,11 @@ def pyomomodel():
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = 200
-    solver.options["Threads"]= 16
-    solver.options["LPWarmStart "] = 2
+    solver.options['TimeLimit'] = 50
+    solver.options["Threads"]= 32
+    solver.options["LPWarmStart"] = 2
+    solver.options["FuncNonlinear"] = 1
+    solver.options['mipgap'] = 0.01
     solver.solve(model, tee=True)
 
     return model

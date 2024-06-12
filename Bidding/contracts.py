@@ -30,8 +30,10 @@ CHP_capacity = 2500
 total_hours = 24
 total_times = 60
 no_contract = 10
-time_limit = 100
-bound_duration = 20
+time_limit = 30
+bound_duration = 60
+
+risk_appetite_threshold = 100
 
 def pyomomodel():
     # Create model
@@ -66,18 +68,16 @@ def pyomomodel():
     # Indicates if a contract is initiated in a specific month
     model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary)
     model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration))
-    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 5000))
-    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
-    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
+    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 2000))
+    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 1))
+    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, bounds=(0, 1))
     model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
-    model.ContractFuelActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
 
     model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
     model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
     model.ContractSupplyType = Var(model.CONTRACTS, within=Binary)
 
-    model.FUELS = Set(initialize=['natural_gas', 'electricity'])
-    model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary)
+    model.risk_score = Var(within=NonNegativeReals)
 
  # -------------- Constraints --------------
     
@@ -107,11 +107,6 @@ def pyomomodel():
         return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
     model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
 
-    # A contract can only be of one fuel type
-    def fuel_type_rule(model, c):
-        return sum(model.FuelType[c, f] for f in model.FUELS) == 1
-    model.FuelTypeConstraint = Constraint(model.CONTRACTS, rule=fuel_type_rule)
-
     # Constraint to set the start price based on the contract's start month
     def set_contract_start_price_rule(model, c):
         return model.ContractStartPrice[c] == sum(NG_market_monthly[m] * model.ContractStart[m, c] for m in model.MONTHS)
@@ -121,9 +116,9 @@ def pyomomodel():
     def contract_price_setting_rule(model, m, c):
         # This needs to be adjusted according to how prices are actually determined.
         return model.ContractPrice[m, c] == (
-            model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] +
-            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] * 0.8 +
-            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] * 0.9
+            model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] * 1.5 +
+            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] +
+            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] * 1.1
         )
     model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
 
@@ -138,13 +133,32 @@ def pyomomodel():
     model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
 
     def demand_fulfillment_rule(model, m):
-        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c]  for c in model.CONTRACTS) >= nat_gas[m] 
+        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= nat_gas[m]
     model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
 
     # ======== CO2 Constraints ========
     def total_emissions_per_interval_rule(model, i):
         return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*intervals_time, (i+1)*intervals_time))
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
+
+        # ----------- Risk Constraints --------------
+    risk_fixed = 1
+    risk_indexed = 3
+    risk_take_or_pay = 2
+
+    def risk_score_rule(model):
+        return model.risk_score == sum(
+            (risk_fixed * model.ContractType[c, 'Fixed'] +
+             risk_indexed * model.ContractType[c, 'Indexed'] +
+             risk_take_or_pay * model.ContractType[c, 'TakeOrPay']) * 
+             model.ContractDuration[c] 
+            for c in model.CONTRACTS
+        )
+    model.RiskScoreCon = Constraint(rule=risk_score_rule)
+
+    def risk_appetite_rule(model):
+        return model.risk_score <= risk_appetite_threshold
+    model.RiskAppetiteCon = Constraint(rule=risk_appetite_rule)
 
     # -------------- Objective Function --------------
 
@@ -180,19 +194,9 @@ if __name__ == '__main__':
                     selected_contract_type = t
                     break
 
-            # Determine the fuel type for the current contract
-            fuel_type = None
-            for f in model.FUELS:
-                if value(model.FuelType[c, f]) >= 0.99:
-                    fuel_type = f
-                    break
-
             # Extract values for amount, price, and duration
             amount = value(model.ContractAmount[m, c])
-            if fuel_type == "natural_gas":
-                price = value(model.ContractPrice[m, c])
-            else:
-                price = value(model.ContractPrice[m, c])
+            price = value(model.ContractPrice[m, c])
             duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
             
             # Print the details including the selected contract type and fuel type

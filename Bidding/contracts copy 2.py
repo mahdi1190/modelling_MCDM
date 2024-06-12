@@ -66,7 +66,7 @@ def pyomomodel():
     # Indicates if a contract is initiated in a specific month
     model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary)
     model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration))
-    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 5000))
+    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 1000))
     model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
     model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, bounds=(0, 10))
     model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)

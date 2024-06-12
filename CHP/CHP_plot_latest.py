@@ -1,6 +1,8 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
+from pyomo.core.expr import identify_variables
+
 import dash_core_components as dcc
 import locale
 locale.setlocale( locale.LC_ALL, '' )
@@ -21,14 +23,14 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 electricity_market = markets["elec"].to_numpy()
-electricity_market_sold = markets["elec_sold"].to_numpy()
+electricity_market_sold = markets["elec_sold"].to_numpy() *0.1
 
-carbon_market = markets["carbon"].to_numpy() / 1000
+carbon_market = markets["carbon"].to_numpy() / 100000
 
 NG_market = markets["nat_gas"].to_numpy()
 NG_market_monthly = markets_monthly["nat_gas"].to_numpy()
 
-heat_market_sold = markets["nat_gas_sold"].to_numpy()
+heat_market_sold = markets["nat_gas_sold"].to_numpy() * 0.1
 
 H2_market = markets["hydrogen"].to_numpy()
 
@@ -126,19 +128,8 @@ def update_graph_height(height_value):
 def update_graphs(n_intervals):
     global last_mod_time  # Declare as global to modify it
     model = pyomomodel()
-    for m in range(10):
-        print(f"Month: {m}")
-
-        for c in range(3):
-            initiated = value(model.ContractInitiated[c, m])
-            active = value(model.ContractActive[m, c])
-            amount = value(model.ContractAmount[m, c])
-            price = value(model.ContractPrice[m, c])
-            duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
-            print(f"  Contract {c}: Initiated: {initiated}, Active: {active}, Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
-        print("\n")
     # Check last modification time of the model file
-    current_mod_time = os.path.getmtime(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\CHP\CHP_plot.py")
+    current_mod_time = os.path.getmtime(r"C:\Users\fcp22sma\modelling_MCDM\CHP\CHP_plot_latest.py")
 
     if current_mod_time > last_mod_time:
         last_mod_time = current_mod_time  # Update last modification time
@@ -301,11 +292,8 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
-total_hours = 24
-total_times = 30
-no_contract = 30
+total_hours = 7500
 time_limit = 300
-bound_duration = 25
 # Create a simple model
 def pyomomodel():
     # Create model
@@ -313,20 +301,13 @@ def pyomomodel():
 
     # -------------- Parameters --------------
     # Time periods (e.g., hours in a day)
-    total_time = total_times
     HOURS = np.arange(total_hours)
     model.HOURS = Set(initialize=HOURS)
 
-    MONTHS = np.arange(total_time)
-    model.MONTHS = Set(initialize=MONTHS)
-
-    no_intervals = 4
+    no_intervals = 30
     intervals_time = int(total_hours / no_intervals)
     INTERVALS = np.arange(no_intervals)  # Four 6-hour intervals in a day
     model.INTERVALS = Set(initialize=INTERVALS)
-
-    no_contracts = np.arange(no_contract)
-    model.CONTRACTS = Set(initialize=range(no_contract))
 
     # Storage
     storage_efficiency = 0.7 # %
@@ -355,18 +336,18 @@ def pyomomodel():
     co2_per_unit_bm = 0.01
     co2_per_unit_h2 = 0.01
     co2_per_unit_elec = 0.25  # kg CO2 per kW of electricity
-    max_co2_emissions = 5000  # kg CO2
+    max_co2_emissions = 5000*7*12  # kg CO2
     M = max_co2_emissions*1E3
 
     CHP_capacity = 4000
-    energy_ratio = 0.23
+    energy_ratio = 0.3
     # -------------- Decision Variables --------------
 
     # CHP System Variables
 
-    model.electricity_production = Var(model.HOURS, within=NonNegativeReals)
-    model.heat_production = Var(model.HOURS, within=NonNegativeReals)
-    model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals)
+    model.electricity_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand) * 1.5))
+    model.heat_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand) * 1.5))
+    model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand) * 1.5))
     
     model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
     model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
@@ -378,137 +359,41 @@ def pyomomodel():
     model.fuel_blend_biomass = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
 
     # Plant Supply and Useful Energy
-    model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals)
-    model.elec_to_plant = Var(model.HOURS, within=NonNegativeReals)
-    model.useful_heat = Var(model.HOURS, within=NonNegativeReals)
-    model.useful_elec = Var(model.HOURS, within=NonNegativeReals)
+    model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
+    model.elec_to_plant = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
+    model.useful_heat = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
+    model.useful_elec = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
 
     # Market and Storage
-    model.purchased_electricity = Var(model.HOURS, within=NonNegativeReals)
+    model.purchased_electricity = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
     model.heat_stored = Var(model.HOURS, within=NonNegativeReals)
     model.heat_withdrawn = Var(model.HOURS, within=NonNegativeReals)
 
     # Overproduction and Ramp Rate
-    model.heat_over_production = Var(model.HOURS, within=NonNegativeReals)
-    model.electricity_over_production = Var(model.HOURS, within=NonNegativeReals)
+    model.heat_over_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
+    model.electricity_over_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
     model.ramp_rate = Var(model.HOURS, within=NonNegativeReals)
 
     # Refrigeration
-    model.refrigeration_produced = Var(model.HOURS, within=NonNegativeReals)
-    model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)
-    model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals)
+    model.refrigeration_produced = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
+    model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
+    model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
 
 
     # Variables
     model.co2_emissions = Var(model.HOURS, within=NonNegativeReals)
     model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
-    model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
+    model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max_co2_emissions))
+    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max_co2_emissions))
+    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max_co2_emissions))
+    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max_co2_emissions))
     model.exceeds_cap = Var(model.INTERVALS, within=Binary)
-    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_unheld = Var(model.INTERVALS, within=NonNegativeReals)
-    model.emissions_difference = Var(model.INTERVALS, domain=Reals)
-    model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals)
+    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max_co2_emissions))
+    model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max_co2_emissions, max_co2_emissions))
+    model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals,bounds=(0, max_co2_emissions))
     model.below_cap = Var(model.INTERVALS, within=Binary)
 
-    # Fixed-price contract
-
-    # Indicates if a contract is initiated in a specific month
-    model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary, initialize=0)
-    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration), initialize=0)
-    model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.HeatContract = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ElecContract = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractAmountElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-
-    model.ForceHeat = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ForceElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-
-    model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals)
-    model.ContractPriceElec = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, initialize=0)
-    model.ContractStartPriceElec = Var(model.CONTRACTS, within=NonNegativeReals)
-
-    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
-
-    # Binary variables for contract types
-    model.ContractTypeFixed = Var(model.CONTRACTS, within=Binary, initialize=1)
-    model.ContractTypeIndexed = Var(model.CONTRACTS, within=Binary, initialize=0)
-    model.ContractTypeTakeOrPay = Var(model.CONTRACTS, within=Binary, initialize=0)
-
-    model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
-    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary, initialize=0)
-    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary, initialize=0)
-
-    model.FUELS = Set(initialize=['natural_gas', 'electricity'])
-    model.FuelType = Var(model.CONTRACTS, model.FUELS, within=Binary)
-    model.FuelTypeActive = Var(model.CONTRACTS, model.MONTHS, model.FUELS, within=Binary)
-
  # -------------- Constraints --------------
-    
-    def contract_duration_rule(model, c):
-        return sum(model.ContractActive[m, c] for m in model.MONTHS) == model.ContractDuration[c]
-    model.ContractDurationCon = Constraint(model.CONTRACTS, rule=contract_duration_rule)
-
-    def min_contract_duration_rule(model, m, c):
-        # Ensure the contract, once activated, has a minimum duration of 3 months
-        return model.ContractDuration[c] >= 3 * model.ContractActive[m, c]
-    model.MinContractDurationCon = Constraint(model.MONTHS, model.CONTRACTS, rule=min_contract_duration_rule)
-
-    def contract_type_rule(model, c):
-        return sum(model.ContractType[c, t] for t in model.ContractTypes) == 1
-    model.ContractTypeConstraint = Constraint(model.CONTRACTS, rule=contract_type_rule)
-
-        # Constraint to link ContractActive with ContractStart
-    def contract_start_rule(model, m, c):
-        if m == 0:
-            return model.ContractActive[m, c] <= model.ContractStart[m, c]
-        else:
-            return model.ContractActive[m, c] <= model.ContractActive[m-1, c] + model.ContractStart[m, c]
-    model.ContractStartCon = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_start_rule)
-
-    # Ensure that the sum of ContractStart for each contract equals 1
-    def contract_single_start_rule(model, c):
-        return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
-    model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
-
-    def fuel_type_rule(model, c):
-        return sum(model.FuelType[c, f] for f in model.FUELS) == 1
-    model.FuelTypeConstraint = Constraint(model.CONTRACTS, rule=fuel_type_rule)
-
-    # Constraint to set the start price based on the contract's start month
-    def set_contract_start_price_rule(model, c):
-        return model.ContractStartPrice[c] == sum(NG_market_monthly[m] * model.ContractStart[m, c] for m in model.MONTHS)
-    model.SetContractStartPrice = Constraint(model.CONTRACTS, rule=set_contract_start_price_rule)
-
-    # Then, use this start price directly in your original constraint, simplifying it
-    def contract_price_setting_rule(model, m, c):
-        # This needs to be adjusted according to how prices are actually determined.
-        return model.ContractPrice[m, c] == (
-            model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] +
-            model.ContractType[c, 'Indexed'] * NG_market_monthly[m] * 0.8 +
-            model.ContractType[c, 'TakeOrPay'] * model.ContractStartPrice[c] * 0.9
-        )
-    model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
-
-    def min_fulfillment_rule(model, m, c):
-        return model.ContractAmount[m, c] >= model.ContractActive[m, c] * (
-
-            500 * model.ContractType[c, 'TakeOrPay'] +
-            250 * (model.ContractType[c, 'Fixed'] + 
-            model.ContractType[c, 'Indexed'])
-            # Note: This assumes the same minimum for Fixed and Indexed contracts for simplicity
-        )
-    model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
-
-    def demand_fulfillment_rule(model, m):
-        return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= heat_demand[m] 
-    model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
-
-    # ======== Heat-Related Constraints ========
-
     # Heat Balance
     def heat_balance_rule(model, h):
         return model.heat_production[h] >= (model.heat_over_production[h] + model.useful_heat[h])
@@ -699,63 +584,53 @@ def pyomomodel():
     # -------------- Objective Function --------------
 
     def objective_rule(model):
-
-        fuel_cost_NG = sum(model.ContractAmount[m, c] * model.ContractPrice[m, c] for m in model.MONTHS for c in model.CONTRACTS)
         #fuel_cost_elec = sum(model.ContractAmountElec[m, c] * model.ContractPriceElec[m, c] for m in model.MONTHS for c in model.CONTRACTS)
 
         elec_cost = sum(model.purchased_electricity[h] * electricity_market[h] for h in model.HOURS)
         elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
         heat_sold = sum((heat_market_sold[h] * model.heat_over_production[h]) for h in model.HOURS)
+        fuel_cost_NG = sum(model.fuel_blend_ng[h] * NG_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost_H2 = sum(model.fuel_blend_h2[h] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS)
+        fuel_cost_BM = sum(model.fuel_blend_biomass[h] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
-        return fuel_cost_NG + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold) #+ fuel_cost_elec
+        return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost - (elec_sold + heat_sold + carbon_sold) #+ fuel_cost_elec
     
 
     model.objective = Objective(rule=objective_rule, sense=minimize)
+        # Check quadratic constraints
+    # Assuming your Pyomo model is 'model'
+# Check for variables with large bounds in quadratic constraints
+# Check for variables with large bounds in quadratic/bilinear constraints
+    for c in model.component_objects(Constraint, active=True):
+        for index in c:
+            expr = c[index].body
+            # Check if the expression is quadratic (includes bilinear)
+            if expr.polynomial_degree() == 2:
+                for var in identify_variables(expr):
+                    if var.ub is not None and var.ub > 1e6:
+                        print(f"Quadratic/Bilinear constraint {c.name} involves variable {var.name} with an upper bound of {var.ub}")
+                    if var.lb is not None and var.lb < -1e6:
+                        print(f"Quadratic/Bilinear constraint {c.name} involves variable {var.name} with a lower bound of {var.lb}")
+
 
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
     solver.options["Threads"]= 32
+    solver.options["LPWarmStart"] = 2
+    solver.options["FuncNonlinear"] = 1
+    solver.options['mipgap'] = 0.01
     solver.solve(model, tee=True)
 
     return model
 
 
+
 # Run the Dash app
 if __name__ == '__main__':
     model = pyomomodel()
-    for m in range(total_times):
-        print(f"Month: {m}")
-        for c in range(no_contract):
-            # Determine the selected contract type for the current contract
-            selected_contract_type = None
-            for t in model.ContractTypes:
-                if value(model.ContractType[c, t]) >= 0.99:  # Assuming model.ContractTypes is your set of contract types
-                    selected_contract_type = t
-                    break
-
-            # Determine the fuel type for the current contract
-            fuel_type = None
-            for f in model.FUELS:
-                if value(model.FuelType[c, f]) >= 0.99:
-                    fuel_type = f
-                    break
-
-            # Extract values for amount, price, and duration
-            amount = value(model.ContractAmount[m, c])
-            if fuel_type == "natural_gas":
-                price = value(model.ContractPrice[m, c])
-            else:
-                price = value(model.ContractPrice[m, c])
-            duration = value(model.ContractDuration[c])  # Assuming this is a parameter and constant for each contract
-            
-            # Print the details including the selected contract type and fuel type
-            print(f"  {selected_contract_type} Contract {c}: Amount: {amount:.2f}, Price: {price:.2f}, Duration: {duration}")
-        print("\n")
-
-
     # Assuming 'app.run_server(debug=True)' is part of your application logic to start a server
     app.run_server(debug=True)
 
