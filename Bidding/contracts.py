@@ -33,7 +33,7 @@ no_contract = 10
 time_limit = 30
 bound_duration = 60
 
-risk_appetite_threshold = 100
+risk_appetite_threshold = 1000
 
 def pyomomodel():
     # Create model
@@ -56,7 +56,6 @@ def pyomomodel():
     model.CONTRACTS = Set(initialize=range(no_contract))
 
     max_co2_emissions = 5000  # kg CO2
-    M = max_co2_emissions*1E3
 
     # -------------- Decision Variables --------------
 

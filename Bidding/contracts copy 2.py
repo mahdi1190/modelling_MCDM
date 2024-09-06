@@ -29,7 +29,7 @@ CHP_capacity = 2500
 
 total_hours = 24
 total_times = 60
-no_contract = 30
+no_contract = 10
 time_limit = 100
 bound_duration = 60
 
