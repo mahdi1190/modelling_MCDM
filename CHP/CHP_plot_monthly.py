@@ -1,7 +1,6 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
-from pyomo.core.expr import identify_variables
 
 import dash_core_components as dcc
 import locale
@@ -19,9 +18,19 @@ locale.setlocale(locale.LC_ALL, '')
 # Initialize Dash app
 last_mod_time = 0
 
-demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx")
-markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
-markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
+# Get the directory of the current script
+current_dir = os.path.dirname(__file__)
+
+# Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
+demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands.xlsx'))
+markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.xlsx'))
+markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
+
+# Read the Excel files
+demands = pd.read_excel(demands_path)
+markets_monthly = pd.read_excel(markets_monthly_path)
+markets = pd.read_excel(markets_path)
+
 
 
 electricity_demand = demands["elec"].to_numpy()
@@ -135,7 +144,7 @@ def update_graphs(n_intervals):
     global last_mod_time  # Declare as global to modify it
 
     # Check last modification time of the model file
-    current_mod_time = os.path.getmtime(r"C:\Users\fcp22sma\modelling_MCDM\CHP\CHP_plot_monthly.py")
+    current_mod_time = os.path.getmtime(current_dir)
 
     if current_mod_time > last_mod_time:
         last_mod_time = current_mod_time  # Update last modification time
