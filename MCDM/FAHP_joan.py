@@ -455,6 +455,7 @@ fig_donut.show()
 import numpy as np
 import plotly.graph_objects as go
 
+# Data and labels for the chart
 sub_criteria_labels = {
     'Emissions': ['CO2', 'Other', 'Indirect'],
     'Economics': ['CAPEX', 'OPEX', 'Maintenance'],
@@ -462,7 +463,6 @@ sub_criteria_labels = {
     'Social': ['Public Relations', 'Job Creation', 'Expertise']
 }
 
-# Data for the bar chart
 bar_data = {
     'Emissions': np.array([0.54586466, 0.27218045, 0.18195489]),
     'Economics': np.array([0.54665687, 0.27112417, 0.18221896]),
@@ -470,7 +470,6 @@ bar_data = {
     'Social': np.array([0.54586466, 0.27218045, 0.18195489])
 }
 
-# Overall weightings for the main criteria
 overall_weights = np.array([0.19027897, 0.34394734, 0.28204848, 0.18372521])
 
 # Adjust the bar data values based on the overall weightings
@@ -479,24 +478,13 @@ for i, (criterion, values) in enumerate(bar_data.items()):
     sub_data[criterion] = values * overall_weights[i]
 
 # Flatten data to create a single list of values and labels
-flat_labels = []
-flat_values = []
-flat_colors = []
-
-# Define a color map for the main criteria
-color_map = {
-    'Emissions': colors_plotly[2],
-    'Economics': colors_plotly[0],
-    'Safety': colors_plotly[1],
-    'Social': colors_plotly[3]  # Reusing color for demonstration, this can be changed
-}
-
-
-# Properly group the sub-criteria based on the specified order
 correct_order_labels = []
 correct_order_values = []
 correct_order_colors = []
 correct_order_pulls = []
+
+# Define a gray scale color map for black-and-white compatibility
+gray_scale_map = ['#FFFFFF', '#4D4D4D', '#999999', '#CCCCCC']  # Different shades of gray
 
 # Specify the correct order for main criteria and sub-criteria
 ordered_criteria = {
@@ -512,7 +500,7 @@ for main_criterion, sub_criterion_order in ordered_criteria.items():
         idx = sub_criteria_labels[main_criterion].index(sub_criterion)
         correct_order_labels.append(sub_criterion)
         correct_order_values.append(sub_data[main_criterion][idx])
-        correct_order_colors.append(color_map[main_criterion])
+        correct_order_colors.append(gray_scale_map[list(ordered_criteria.keys()).index(main_criterion)])
         correct_order_pulls.append(0.1)
 
 # Generate the donut chart with the proper grouping
@@ -522,7 +510,7 @@ fig_correct_order_donut = go.Figure(data=[go.Pie(
     hole=0.3,
     textinfo='label+percent',
     pull=correct_order_pulls,
-    marker=dict(colors=correct_order_colors),
+    marker=dict(colors=correct_order_colors, line=dict(color='black', width=1)),  # Add black borders
     insidetextorientation='radial',
     textfont=dict(size=25, family="Georgia, bold", color="black"),
     sort=False
@@ -531,17 +519,17 @@ fig_correct_order_donut = go.Figure(data=[go.Pie(
 fig_correct_order_donut.update_layout(
     title_text="Sub-Criteria Weights Ordered",
     title_font=dict(size=24, family="Georgia, bold", color="black"),
+    showlegend=False,  # Hide the legend
     legend_title_text="Criteria",
     legend_title_font=dict(size=14, family="Georgia, bold", color="black"),
     legend_font=dict(size=14, family="Georgia"),
-    template='seaborn'
+    template='seaborn',
+    paper_bgcolor='white',
+    plot_bgcolor='white'
 )
-
+#fig_correct_order_donut.write_image("figure.svg")
+#cairosvg.svg2eps(url="figure.svg", write_to="figure.eps")
 fig_correct_order_donut.show()
-
-
-
-
 
 
 # Data for the bar chart
@@ -572,7 +560,6 @@ for criterion, values in adjusted_bar_data.items():
             x=[label],
             y=[value],
             name=label,
-            marker_color=color_map[criterion]
         ))
 
 # Update the layout
@@ -651,6 +638,13 @@ sorted_indices = np.argsort(weights)[::-1]
 sorted_systems = np.array(systems)[sorted_indices].tolist()
 sorted_weights = np.array(weights)[sorted_indices].tolist()
 
+# Define a gray scale color map for black-and-white compatibility
+gray_scale_map = ['#555555', '#777777', '#999999', '#AAAAAA', '#CCCCCC', '#FFFFFF']
+
+# Ensure the number of gray shades matches the number of systems
+marker_colors = gray_scale_map[:len(systems)]
+
+# Adjust the bargap to make the bars closer together
 # Adjust the bargap to make the bars closer together
 fig_sorted_thinner_bars = go.Figure(data=[go.Bar(
     x=sorted_systems,
@@ -659,7 +653,10 @@ fig_sorted_thinner_bars = go.Figure(data=[go.Bar(
     textposition='auto',
     texttemplate='%{text:.2%}',  # Format as percentage
     textfont=dict(size=16, family="Georgia, bold", color="black"),
-    marker_color=np.array(colors_plotly[:len(systems)])[sorted_indices].tolist(),  # Use the sorted colors
+    marker=dict(
+        color=marker_colors,  # Use the sorted gray colors
+        line=dict(color='black', width=1.5)  # Add black outline to bars
+    )
 )])
 
 fig_sorted_thinner_bars.update_layout(
@@ -669,7 +666,19 @@ fig_sorted_thinner_bars.update_layout(
     yaxis_title="Weights",
     template='seaborn',
     yaxis_tickformat='.1%',  # Format y-axis as percentage
-    bargap=0.6  # Make bars closer together
+    bargap=0.6,  # Make bars closer together
+    paper_bgcolor='white',
+    plot_bgcolor='white',
+    xaxis=dict(
+        showgrid=True,
+        gridcolor='black',  # Grid line color
+        gridwidth=0.5  # Grid line width
+    ),
+    yaxis=dict(
+        showgrid=True,
+        gridcolor='black',  # Grid line color
+        gridwidth=0.5  # Grid line width
+    )
 )
 
 fig_sorted_thinner_bars.show()
