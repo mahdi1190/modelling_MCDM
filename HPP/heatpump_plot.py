@@ -1,15 +1,11 @@
 from pyomo.environ import *
-from pyomo.environ import Param, NonNegativeReals
+from pyomo.opt import SolverFactory
 import pandas as pd
 import locale
 locale.setlocale( locale.LC_ALL, '' )
 import os
 import numpy as np
-import dash_html_components as html
-from dash import dcc, html, Input, Output, State
-from dash.dependencies import Input, Output
-
-
+print("hi1")
 demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
 
@@ -56,6 +52,7 @@ target_temp = 700
 
 MAX_TEMP_LIFT = 90
 
+print("hi2")
 def pyomomodel():
     # Create model
     model = ConcreteModel()
@@ -161,9 +158,8 @@ def pyomomodel():
     solver = SolverFactory(solvere)
     if solvere == "gurobi":
         solver.options['NonConvex'] = 2
-        solver.options['TimeLimit'] = 10
-        solver.options["Threads"]= 16
-        solver.options["LPWarmStart "]= 2
+        solver.options['TimeLimit'] = 100
+        solver.options["Threads"] = 16
     solver.solve(model, tee=True)
 
     return model

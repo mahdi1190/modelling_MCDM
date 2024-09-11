@@ -1,20 +1,18 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
-import dash_core_components as dcc
 import locale
 locale.setlocale( locale.LC_ALL, '' )
 import os
 import numpy as np
-import dash_html_components as html
 from dash import dcc, html, Input, Output, State
 from dash.dependencies import Input, Output
 # Initialize Dash app
 last_mod_time = 0
 
-demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx")
-markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
-markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
+demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\demands.xlsx", nrows=10000)
+markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx", nrows=10000)
+markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx", nrows=10000)
 
 
 electricity_demand = demands["elec"].to_numpy()

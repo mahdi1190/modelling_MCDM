@@ -3,10 +3,16 @@ import pandas as pd
 import os
 import numpy as np
 
+current_dir = os.path.dirname(__file__)
+# Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
+demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'optimized_demands.xlsx'))
+markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.xlsx'))
+markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
 
-demands = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\optimized_demands.xlsx")
-markets = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets.xlsx")
-markets_monthly = pd.read_excel(r"C:\Users\fcp22sma\modelling_MCDM\data\markets_monthly.xlsx")
+# Read the Excel files
+demands = pd.read_excel(demands_path)
+markets_monthly = pd.read_excel(markets_monthly_path)
+markets = pd.read_excel(markets_path)
 
 
 electricity_demand = demands["purchased_elec"].to_numpy() #kWh
@@ -29,18 +35,19 @@ CHP_capacity = 2500
 
 total_hours = 24
 total_times = 60
-no_contract = 10
-time_limit = 30
+no_contract = 15
+time_limit = 120
 bound_duration = 60
 
-risk_appetite_threshold = 1000
+risk_appetite_threshold = 10000
+
+from pyomo.environ import *
 
 def pyomomodel():
     # Create model
     model = ConcreteModel()
 
-    # -------------- Parameters --------------
-    # Time periods (e.g., hours in a day)
+    # Parameters and sets remain the same as in your original code.
     total_time = total_times
     HOURS = np.arange(total_hours)
     model.HOURS = Set(initialize=HOURS)
@@ -50,70 +57,66 @@ def pyomomodel():
 
     no_intervals = 4
     intervals_time = int(total_hours / no_intervals)
-    INTERVALS = np.arange(no_intervals)  # Four 6-hour intervals in a day
+    INTERVALS = np.arange(no_intervals)  
     model.INTERVALS = Set(initialize=INTERVALS)
 
     model.CONTRACTS = Set(initialize=range(no_contract))
+    model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
 
-    max_co2_emissions = 5000  # kg CO2
-
-    # -------------- Decision Variables --------------
-
-    # Variables
+    # Define Variables
     model.co2_emissions = Var(model.HOURS, within=NonNegativeReals)
     model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
-    # Fixed-price contract
 
-    # Indicates if a contract is initiated in a specific month
+    # Binary and continuous variables for contracts
     model.ContractStart = Var(model.MONTHS, model.CONTRACTS, within=Binary)
-    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration))
+    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
+    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
     model.ContractAmount = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 2000))
     model.ContractPrice = Var(model.MONTHS, model.CONTRACTS, within=NonNegativeReals, bounds=(0, 1))
     model.ContractStartPrice = Var(model.CONTRACTS, within=NonNegativeReals, bounds=(0, 1))
-    model.ContractActive = Var(model.MONTHS, model.CONTRACTS, within=Binary)
+    model.ContractDuration = Var(model.CONTRACTS, within=NonNegativeIntegers, bounds=(0, bound_duration))
 
-    model.ContractTypes = Set(initialize=['Fixed', 'Indexed', 'TakeOrPay'])
-    model.ContractType = Var(model.CONTRACTS, model.ContractTypes, within=Binary)
-    model.ContractSupplyType = Var(model.CONTRACTS, within=Binary)
+    model.risk_score = Var(within=NonNegativeReals, bounds=(0, risk_appetite_threshold))
 
-    model.risk_score = Var(within=NonNegativeReals)
+    # Constraints
 
- # -------------- Constraints --------------
-    
+    # Duration constraint for each contract
     def contract_duration_rule(model, c):
+        # Sum of active months should equal the contract duration
         return sum(model.ContractActive[m, c] for m in model.MONTHS) == model.ContractDuration[c]
     model.ContractDurationCon = Constraint(model.CONTRACTS, rule=contract_duration_rule)
 
-    def min_contract_duration_rule(model, m, c):
-        # Ensure the contract, once activated, has a minimum duration of 3 months
-        return model.ContractDuration[c] >= 3 * model.ContractActive[m, c]
-    model.MinContractDurationCon = Constraint(model.MONTHS, model.CONTRACTS, rule=min_contract_duration_rule)
+    # Ensure minimum duration for each contract after it starts
+    def min_contract_duration_rule(model, c):
+        # Minimum contract duration of 3 months if the contract is active
+        return sum(model.ContractActive[m, c] for m in model.MONTHS) >= 3 * sum(model.ContractStart[m, c] for m in model.MONTHS)
+    model.MinContractDurationCon = Constraint(model.CONTRACTS, rule=min_contract_duration_rule)
 
+    # Ensure only one contract type is selected per contract
     def contract_type_rule(model, c):
         return sum(model.ContractType[c, t] for t in model.ContractTypes) == 1
     model.ContractTypeConstraint = Constraint(model.CONTRACTS, rule=contract_type_rule)
 
-        # Constraint to link ContractActive with ContractStart
-    def contract_start_rule(model, m, c):
+    # Linking contract start to active months
+    def contract_active_rule(model, m, c):
         if m == 0:
-            return model.ContractActive[m, c] <= model.ContractStart[m, c]
+            return model.ContractActive[m, c] == model.ContractStart[m, c]
         else:
-            return model.ContractActive[m, c] <= model.ContractActive[m-1, c] + model.ContractStart[m, c]
-    model.ContractStartCon = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_start_rule)
+            return model.ContractActive[m, c] >= model.ContractActive[m - 1, c] + model.ContractStart[m, c] - 1
+    model.ContractActiveCon = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_active_rule)
 
-    # Ensure that the sum of ContractStart for each contract equals 1
+    # Ensure only one contract start per contract
     def contract_single_start_rule(model, c):
         return sum(model.ContractStart[m, c] for m in model.MONTHS) == 1
     model.ContractSingleStartCon = Constraint(model.CONTRACTS, rule=contract_single_start_rule)
 
-    # Constraint to set the start price based on the contract's start month
+    # Set start price based on contract's start month
     def set_contract_start_price_rule(model, c):
         return model.ContractStartPrice[c] == sum(NG_market_monthly[m] * model.ContractStart[m, c] for m in model.MONTHS)
     model.SetContractStartPrice = Constraint(model.CONTRACTS, rule=set_contract_start_price_rule)
 
-    # Then, use this start price directly in your original constraint, simplifying it
+    # Contract price setting rule
     def contract_price_setting_rule(model, m, c):
-        # This needs to be adjusted according to how prices are actually determined.
         return model.ContractPrice[m, c] == (
             model.ContractType[c, 'Fixed'] * model.ContractStartPrice[c] * 1.5 +
             model.ContractType[c, 'Indexed'] * NG_market_monthly[m] +
@@ -121,65 +124,53 @@ def pyomomodel():
         )
     model.ContractPriceSetting = Constraint(model.MONTHS, model.CONTRACTS, rule=contract_price_setting_rule)
 
+    # Minimum contract fulfillment amount
     def min_fulfillment_rule(model, m, c):
         return model.ContractAmount[m, c] >= model.ContractActive[m, c] * (
-
             500 * model.ContractType[c, 'TakeOrPay'] +
-            250 * (model.ContractType[c, 'Fixed'] + 
-            model.ContractType[c, 'Indexed'])
-            # Note: This assumes the same minimum for Fixed and Indexed contracts for simplicity
+            250 * (model.ContractType[c, 'Fixed'] + model.ContractType[c, 'Indexed'])
         )
     model.min_fulfillment_con = Constraint(model.MONTHS, model.CONTRACTS, rule=min_fulfillment_rule)
 
+    # Ensure demand fulfillment for natural gas
     def demand_fulfillment_rule(model, m):
         return sum(model.ContractAmount[m, c] * model.ContractActive[m, c] for c in model.CONTRACTS) >= nat_gas[m]
     model.demand_fulfillment_con = Constraint(model.MONTHS, rule=demand_fulfillment_rule)
 
-    # ======== CO2 Constraints ========
+    # CO2 emissions calculation per interval
     def total_emissions_per_interval_rule(model, i):
-        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i*intervals_time, (i+1)*intervals_time))
+        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[h] for h in range(i * intervals_time, (i+1) * intervals_time))
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
-        # ----------- Risk Constraints --------------
-    risk_fixed = 1
-    risk_indexed = 3
-    risk_take_or_pay = 2
-
+    # Risk score calculation
     def risk_score_rule(model):
         return model.risk_score == sum(
-            (risk_fixed * model.ContractType[c, 'Fixed'] +
-             risk_indexed * model.ContractType[c, 'Indexed'] +
-             risk_take_or_pay * model.ContractType[c, 'TakeOrPay']) * 
+            (1 * model.ContractType[c, 'Fixed'] +
+             3 * model.ContractType[c, 'Indexed'] +
+             2 * model.ContractType[c, 'TakeOrPay']) * 
              model.ContractDuration[c] 
             for c in model.CONTRACTS
         )
     model.RiskScoreCon = Constraint(rule=risk_score_rule)
 
-    def risk_appetite_rule(model):
-        return model.risk_score <= risk_appetite_threshold
-    model.RiskAppetiteCon = Constraint(rule=risk_appetite_rule)
-
-    # -------------- Objective Function --------------
-
+    # Objective function
     def objective_rule(model):
         fuel_cost_NG = sum(model.ContractAmount[m, c] * model.ContractPrice[m, c] for m in model.MONTHS for c in model.CONTRACTS)
-        #fuel_cost_elec = sum(model.ContractAmountElec[m, c] * model.ContractPriceElec[m, c] for m in model.MONTHS for c in model.CONTRACTS)
-        carbon_cost = 0
-        carbon_sold = 0
-        return fuel_cost_NG + carbon_cost - (carbon_sold) 
+        return fuel_cost_NG
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
-    # -------------- Solver --------------
+    # Solver options
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 32
+    solver.options["Threads"] = 16
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
     solver.options['mipgap'] = 0.01
     solver.solve(model, tee=True)
 
     return model
+
 
 if __name__ == '__main__':
     model = pyomomodel()

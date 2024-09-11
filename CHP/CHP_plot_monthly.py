@@ -1,19 +1,14 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
-
-import dash_core_components as dcc
-import locale
-locale.setlocale(locale.LC_ALL, '')
+from dash import dcc, html, Input, Output, State  # Combined into a single line
 import os
 import numpy as np
-import dash_html_components as html
-from dash import dcc, html, Input, Output, State
-from dash.dependencies import Input, Output
-from dash import dcc
-from dash import html
+import locale
+import gc
+gc.disable()  # Disable garbage collection temporarily
 
-locale.setlocale(locale.LC_ALL, '')
+locale.setlocale(locale.LC_ALL, '')  # Setting locale once here
 
 # Initialize Dash app
 last_mod_time = 0
@@ -27,9 +22,9 @@ markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', '
 markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
 
 # Read the Excel files
-demands = pd.read_excel(demands_path)
-markets_monthly = pd.read_excel(markets_monthly_path)
-markets = pd.read_excel(markets_path)
+demands = pd.read_excel(demands_path, nrows=10000)
+markets_monthly = pd.read_excel(markets_monthly_path, nrows=10000)
+markets = pd.read_excel(markets_path, nrows=10000)
 
 
 
@@ -37,14 +32,14 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 electricity_market = markets["elec"].to_numpy()
-electricity_market_sold = markets["elec_sold"].to_numpy() * 0.5
+electricity_market_sold = markets["elec_sold"].to_numpy()
 
-carbon_market = markets["carbon"].to_numpy()
+carbon_market = markets["carbon"].to_numpy() * 1
 
 NG_market = markets["nat_gas"].to_numpy()
 NG_market_monthly = markets_monthly["nat_gas"].to_numpy()
 
-heat_market_sold = markets["nat_gas_sold"].to_numpy() * 0.5
+heat_market_sold = markets["nat_gas_sold"].to_numpy() * 2
 
 H2_market = markets["hydrogen"].to_numpy()
 
@@ -347,7 +342,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # CHP params
     capital_cost_per_kw = 1000 # $/kw
     fuel_energy = 1  # kW
-    max_ramp_rate = 500  #kW/timestep
+    max_ramp_rate = 5000  #kW/timestep
 
     TEMP = 700
     PRES = 50
@@ -356,14 +351,14 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     h2_coeffs = {"elec": [0.18, 0.02, 0.0015], "thermal": [0.15, 0.04, 0.0012]}  # Placeholder
 
 
-    h2_capex = 10000  # Example value, adjust based on your case
+    h2_capex = 5000  # Example value, adjust based on your case
 
 
     # Co2 params
-    co2_per_unit_ng = 0.3  # kg CO2 per kW of fuel
+    co2_per_unit_ng = 0.182  # kg CO2 per kW of fuel
     co2_per_unit_bm = 0.1
     co2_per_unit_h2 = 0.01
-    co2_per_unit_elec = 0.2  # kg CO2 per kW of electricity
+    co2_per_unit_elec = 0.22  # kg CO2 per kW of electricity
     max_co2_emissions = markets["cap"]  # kg CO2
     M = 1E6
     # -------------- Decision Variables --------------
@@ -660,14 +655,14 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost - (elec_sold + heat_sold + carbon_sold)
     model.objective = Objective(rule=objective_rule, sense=minimize)
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi")
+    solver = SolverFactory("gurobi", solver_io='direct')
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 32
+    solver.options["Threads"]= 16
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.01
-    solver.solve(model, tee=True)
+    solver.options['mipgap'] = 0.001
+    solver.solve(model, tee=True, symbolic_solver_labels=False)
 
         # Extract results after solving the monthly model
     fuel_blend_ng_results = {m: value(model.fuel_blend_ng[m]) for m in model.MONTHS}
@@ -695,6 +690,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     return model
 
+gc.enable()  # Re-enable garbage collection after the critical section
 
 
 # Run the Dash app

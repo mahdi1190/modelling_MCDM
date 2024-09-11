@@ -1,12 +1,10 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
-import dash_core_components as dcc
 import locale
 locale.setlocale( locale.LC_ALL, '' )
 import os
 import numpy as np
-import dash_html_components as html
 from dash import dcc, html, Input, Output, State
 from dash.dependencies import Input, Output
 
@@ -196,7 +194,6 @@ def pyomomodel():
         solver.options['NonConvex'] = 2
         solver.options['TimeLimit'] = 60
         solver.options["Threads"]= 16
-        solver.options["LPWarmStart "] = 2
     solver.solve(model, tee=True)
 
     return model

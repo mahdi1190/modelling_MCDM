@@ -19,9 +19,9 @@ markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', '
 markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
 
 # Read the Excel files
-demands = pd.read_excel(demands_path)
-markets_monthly = pd.read_excel(markets_monthly_path)
-markets = pd.read_excel(markets_path)
+demands = pd.read_excel(demands_path, nrows=10000)
+markets_monthly = pd.read_excel(markets_monthly_path, nrows=10000)
+markets = pd.read_excel(markets_path, nrows=10000)
 
 
 electricity_demand = demands["elec"].to_numpy()
@@ -307,7 +307,7 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
-total_hours = 7500
+total_hours = 8400
 time_limit = 90
 # Create a simple model
 def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
@@ -350,10 +350,10 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
 
     # Co2 params
-    co2_per_unit_ng = 0.2  # kg CO2 per kW of fuel
+    co2_per_unit_ng = 0.18  # kg CO2 per kW of fuel
     co2_per_unit_bm = 0.1
     co2_per_unit_h2 = 0.01
-    co2_per_unit_elec = 0.18  # kg CO2 per kW of electricity
+    co2_per_unit_elec = 0.22  # kg CO2 per kW of electricity
     max_co2_emissions = markets["cap"]  # kg CO2
     M = 1E6
     # -------------- Decision Variables --------------
@@ -412,6 +412,9 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max(max_co2_emissions),max(max_co2_emissions)))
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals,bounds=(0, max(max_co2_emissions)))
     model.below_cap = Var(model.INTERVALS, within=Binary)
+
+    model.production_output = Var(model.HOURS, within=NonNegativeReals)
+
 
  # -------------- Constraints --------------
     # Heat Balance
@@ -566,6 +569,15 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
 # ======== CO2 Constraints ========
+    def co2_emissions_rule(model, h):
+        i = h // (len(model.HOURS) // len(model.INTERVALS))  # Map month to interval
+        return model.co2_emissions[i] == (
+            co2_per_unit_ng * model.fuel_blend_ng[i] * model.fuel_consumed[i] +
+            co2_per_unit_h2 * model.fuel_blend_h2[i] * model.fuel_consumed[i] +
+            co2_per_unit_bm * model.fuel_blend_biomass[i] * model.fuel_consumed[i] +
+            co2_per_unit_elec * model.purchased_electricity[i]
+        )
+    model.co2_emissions_constraint = Constraint(model.HOURS, rule=co2_emissions_rule)
 
     # Total Emissions Per Interval Rule
     def total_emissions_per_interval_rule(model, i):
@@ -617,6 +629,17 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         return Constraint.Skip
     model.force_0_rule_con = Constraint(model.INTERVALS, rule=force_0_rule)
 
+
+    # Production Output Constraint
+    def production_output_rule(model, h):
+        # Assuming a linear relationship for simplicity; you can modify this as needed
+        production_output_ratio = 0.8  # Example production-output-to-energy ratio
+        return model.production_output[h] == production_output_ratio * (heat_demand[h])
+    model.production_output_constraint = Constraint(model.HOURS, rule=production_output_rule)
+
+    # -------------- Anchillary market participation --------------
+
+    
     # -------------- Objective Function --------------
 
     def objective_rule(model):
@@ -627,9 +650,12 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         fuel_cost_H2 = sum(model.fuel_blend_h2[i] * H2_market[h] * model.fuel_consumed[h] for h in model.HOURS for i in model.INTERVALS if h // intervals_time == i)
         fuel_cost_BM = sum(model.fuel_blend_biomass[i] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS for i in model.INTERVALS if h // intervals_time == i)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.9
+        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.6
         h2_investment_cost = model.invest_h2 * h2_capex
-        return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost - (elec_sold + heat_sold + carbon_sold)
+
+        production_revenue = sum(model.production_output[h] * 2 for h in model.HOURS)
+
+        return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost - (elec_sold + heat_sold + carbon_sold + production_revenue)
 
     
 
@@ -638,7 +664,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 32
+    solver.options["Threads"]= 16
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
     solver.options['mipgap'] = 0.01
