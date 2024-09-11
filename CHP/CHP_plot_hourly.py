@@ -17,12 +17,17 @@ current_dir = os.path.dirname(__file__)
 demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands.xlsx'))
 markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.xlsx'))
 markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
+load_shedding_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'load_shedding.xlsx'))  # Corrected path
 
 # Read the Excel files
 demands = pd.read_excel(demands_path, nrows=10000)
 markets_monthly = pd.read_excel(markets_monthly_path, nrows=10000)
 markets = pd.read_excel(markets_path, nrows=10000)
+load_shedding = pd.read_excel(load_shedding_path, nrows=10000)
 
+shortfall_penalty = load_shedding["penalty"].to_numpy()
+reward = load_shedding["revenue"].to_numpy()
+request = load_shedding["request"].to_numpy()
 
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
@@ -43,7 +48,7 @@ BM_market = markets["biomass"].to_numpy()
 
 CHP_capacity = 4000
 
-energy_ratio = 0.3
+energy_ratio = 0.22
 
 app = dash.Dash(__name__)
 
@@ -141,16 +146,6 @@ def update_graphs(n_intervals):
         last_mod_time = current_mod_time  # Update last modification time
 
         model = pyomomodel()
-
-        investment_made = False
-        for i in model.INTERVALS:
-            if value(model.invest_time[i]) > 0.5:  # Check if the binary variable is 1
-                print(f"Investment in hydrogen is made at interval {i}")
-                investment_made = True
-                break
-
-        if not investment_made:
-            print("No investment in hydrogen was made.")
         hours_list = list(model.HOURS)
         intervals_list = list(model.INTERVALS)
 
@@ -188,6 +183,9 @@ def update_graphs(n_intervals):
         blend_H2 = [model.fuel_blend_h2[i]() for i in intervals_list]
         blend_ng = [model.fuel_blend_ng[i]() for i in intervals_list]
         blend_bm = [model.fuel_blend_biomass[i]() for i in intervals_list]
+        elec_reduction = [model.elec_reduction_by_CHP[h]() for h in hours_list]
+        heat_reduction = [model.heat_reduction_by_CHP[h]() for h in hours_list]
+        
         # Create figures based on these results
 
         base_layout_template = {
@@ -230,7 +228,8 @@ def update_graphs(n_intervals):
                 {'x': list(model.HOURS), 'y': [electricity_demand[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash'}, 'name': 'Demand',},
                 {'x': list(model.HOURS), 'y': electricity_production, 'type': 'line', 'name': 'Production', 'line': {'color': 'blue'}},
                 {'x': list(model.HOURS), 'y': [purchased_electricity[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dash', 'line': {'color': 'hydrogen'}}, 'name': 'Purchased Electricity'},
-                {'x': list(model.HOURS), 'y': [over_electricity[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Over-Produced Electricity'}
+                {'x': list(model.HOURS), 'y': [over_electricity[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Over-Produced Electricity'},
+                {'x': list(model.HOURS), 'y': [elec_reduction[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Load-Shedding Electricity'}
             ],
             'layout': electricity_layout,
         }
@@ -241,6 +240,7 @@ def update_graphs(n_intervals):
                 {'x': list(model.HOURS), 'y': heat_production, 'type': 'line', 'name': 'Production'},
                 {'x': list(model.HOURS), 'y': heat_stored, 'line': {'width': 3, 'dash': 'dot'}, 'name': 'Stored'},
                 {'x': list(model.HOURS), 'y': over_heat, 'type': 'line', 'name': 'Over-Production'},
+                {'x': list(model.HOURS), 'y': [heat_reduction[h] for h in list(model.HOURS)], 'line': {'width': 3, 'dash': 'dot', 'color': 'hydrogen'}, 'name': 'Load-Shedding Heat'}
             ],
             'layout': heat_layout,
         }
@@ -307,7 +307,7 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
-total_hours = 8400
+total_hours = 7500
 time_limit = 90
 # Create a simple model
 def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
@@ -399,7 +399,6 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
 
-
     # Variables
     model.co2_emissions = Var(model.HOURS, within=NonNegativeReals)
     model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
@@ -415,6 +414,13 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     model.production_output = Var(model.HOURS, within=NonNegativeReals)
 
+    # Flexibility variables for ancillary market participation
+    # Flexibility variables for load shedding
+    model.elec_reduction_by_CHP = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
+    model.heat_reduction_by_CHP = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
+
+    # Penalty variable for shortfall in grid reduction request
+    model.grid_reduction_shortfall = Var(model.HOURS, within=NonNegativeReals)
 
  # -------------- Constraints --------------
     # Heat Balance
@@ -422,9 +428,14 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         return model.heat_production[h] >= (model.heat_over_production[h] + model.useful_heat[h])
     model.heat_balance = Constraint(model.HOURS, rule=heat_balance_rule)
 
+    # Heat Balance
+    def heat_reduction_rule(model, h):
+        return model.heat_reduction_by_CHP[h] == (model.elec_reduction_by_CHP[h] * (1-energy_ratio))
+    model.heat_balance_reduction = Constraint(model.HOURS, rule=heat_reduction_rule)
+
     # Heat Demand
     def heat_demand_balance(model, h):
-        return model.heat_to_plant[h] == heat_demand[h]
+        return model.heat_to_plant[h] == heat_demand[h] - model.heat_reduction_by_CHP[h]
     model.heat_demand_rule = Constraint(model.HOURS, rule=heat_demand_balance)
 
     # Overproduction of Heat
@@ -441,7 +452,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     # Electricity Demand
     def elec_demand_balance(model, h):
-        return model.elec_to_plant[h] + model.purchased_electricity[h] == electricity_demand[h]
+        return model.elec_to_plant[h] + model.purchased_electricity[h] == electricity_demand[h] - model.elec_reduction_by_CHP[h]
     model.elec_demand_rule = Constraint(model.HOURS, rule=elec_demand_balance)
 
     # Useful Electricity
@@ -492,17 +503,6 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     def fuel_blend_rule(model, i):
         return model.fuel_blend_ng[i] + model.fuel_blend_h2[i] + model.fuel_blend_biomass[i] == 1
     model.fuel_blend_constraint = Constraint(model.INTERVALS, rule=fuel_blend_rule)
-
-    # Ensure that hydrogen can only be blended after the investment is made
-    def h2_blending_activation_rule(model, i):
-        return model.fuel_blend_h2[i] <= model.active_h2_blending[i]
-    model.h2_blending_activation_constraint = Constraint(model.INTERVALS, rule=h2_blending_activation_rule)
-
-    # Ensure that hydrogen blending is only active after the investment time
-    def active_h2_blending_rule(model, i):
-        # Hydrogen blending is allowed in interval `i` if investment has been made in any interval `j` <= `i`
-        return model.active_h2_blending[i] == sum(model.invest_time[j] for j in model.INTERVALS if j <= i)
-    model.active_h2_blending_constraint = Constraint(model.INTERVALS, rule=active_h2_blending_rule)
 
     # Limit the investment to happen only once
     def single_investment_rule(model):
@@ -634,11 +634,23 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     def production_output_rule(model, h):
         # Assuming a linear relationship for simplicity; you can modify this as needed
         production_output_ratio = 0.8  # Example production-output-to-energy ratio
-        return model.production_output[h] == production_output_ratio * (heat_demand[h])
+        return model.production_output[h] == production_output_ratio * (heat_demand[h] + electricity_demand[h] - model.elec_reduction_by_CHP[h] - model.heat_reduction_by_CHP[h])
     model.production_output_constraint = Constraint(model.HOURS, rule=production_output_rule)
 
     # -------------- Anchillary market participation --------------
 
+    plant_flexibility = 0.5
+    # Modified constraint to allow shortfall in grid reduction
+    # Modified constraint to allow shortfall in grid reduction for each hour
+    def grid_call_constraint(model, h):
+        return model.elec_reduction_by_CHP[h] + model.grid_reduction_shortfall[h] >= request[h]
+    model.grid_call_constraint = Constraint(model.HOURS, rule=grid_call_constraint)
+
+
+        # Constraint to limit the maximum reduction based on plant flexibility
+    def flexibility_constraint(model, h):
+        return model.elec_reduction_by_CHP[h] <= plant_flexibility * electricity_demand[h]
+    model.flexibility_constraint = Constraint(model.HOURS, rule=flexibility_constraint)
     
     # -------------- Objective Function --------------
 
@@ -651,14 +663,13 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         fuel_cost_BM = sum(model.fuel_blend_biomass[i] * BM_market[h] * model.fuel_consumed[h] for h in model.HOURS for i in model.INTERVALS if h // intervals_time == i)
         carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.6
-        h2_investment_cost = model.invest_h2 * h2_capex
 
-        production_revenue = sum(model.production_output[h] * 2 for h in model.HOURS)
+        production_revenue = sum(model.production_output[h] for h in model.HOURS)
+        ancillary_revenue = sum(reward[h] * (model.elec_reduction_by_CHP[h]) for h in model.HOURS)
+        all_shortfall_penalty = sum(shortfall_penalty[h] * model.grid_reduction_shortfall[h] for h in model.HOURS)
 
-        return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost - (elec_sold + heat_sold + carbon_sold + production_revenue)
 
-    
-
+        return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + all_shortfall_penalty - (elec_sold + heat_sold + carbon_sold + production_revenue + ancillary_revenue)
     model.objective = Objective(rule=objective_rule, sense=minimize)
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
