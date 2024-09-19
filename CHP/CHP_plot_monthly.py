@@ -39,9 +39,9 @@ carbon_market = markets["carbon"].to_numpy() * 1
 NG_market = markets["nat_gas"].to_numpy()
 NG_market_monthly = markets_monthly["nat_gas"].to_numpy()
 
-heat_market_sold = markets["nat_gas_sold"].to_numpy() * 2
+heat_market_sold = markets["nat_gas_sold"].to_numpy()
 
-H2_market = markets["hydrogen"].to_numpy()
+H2_market = markets["hydrogen"].to_numpy() * 0.01
 
 BM_market = markets["biomass"].to_numpy()
 
@@ -355,10 +355,10 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
 
     # Co2 params
-    co2_per_unit_ng = 0.182  # kg CO2 per kW of fuel
+    co2_per_unit_ng = 0.37  # kg CO2 per kW of fuel
     co2_per_unit_bm = 0.1
     co2_per_unit_h2 = 0.01
-    co2_per_unit_elec = 0.22  # kg CO2 per kW of electricity
+    co2_per_unit_elec = 0.23  # kg CO2 per kW of electricity
     max_co2_emissions = markets["cap"]  # kg CO2
     M = 1E6
     # -------------- Decision Variables --------------

@@ -307,7 +307,7 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
-total_hours = 7500
+total_hours = 8400
 time_limit = 90
 # Create a simple model
 def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
@@ -350,10 +350,10 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
 
     # Co2 params
-    co2_per_unit_ng = 0.18  # kg CO2 per kW of fuel
+    co2_per_unit_ng = 0.37  # kg CO2 per kW of fuel
     co2_per_unit_bm = 0.1
     co2_per_unit_h2 = 0.01
-    co2_per_unit_elec = 0.22  # kg CO2 per kW of electricity
+    co2_per_unit_elec = 0.23  # kg CO2 per kW of electricity
     max_co2_emissions = markets["cap"]  # kg CO2
     M = 1E6
     # -------------- Decision Variables --------------
@@ -364,8 +364,8 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.heat_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand) * 2))
     model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand) * 3))
     
-    model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0.99, 1))
-    model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0.99, 1))
+    model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
+    model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(0, 1))
 
     # Fuel variables
     model.fuel_blend_ng = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, 1))
@@ -474,7 +474,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     # Fuel Consumption
     def fuel_consumed_rule(model, h):
-        return fuel_energy * model.fuel_consumed[h] * (1 - energy_ratio) * model.thermal_efficiency[h] == model.heat_production[h]
+        return fuel_energy * model.fuel_consumed[h] * (1 - energy_ratio) * 1 == model.heat_production[h]
     model.fuel_consumed_rule = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     def electrical_efficiency_rule(model, h):
@@ -503,11 +503,6 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     def fuel_blend_rule(model, i):
         return model.fuel_blend_ng[i] + model.fuel_blend_h2[i] + model.fuel_blend_biomass[i] == 1
     model.fuel_blend_constraint = Constraint(model.INTERVALS, rule=fuel_blend_rule)
-
-    # Limit the investment to happen only once
-    def single_investment_rule(model):
-        return sum(model.invest_time[i] for i in model.INTERVALS) == model.invest_h2
-    model.single_investment_constraint = Constraint(rule=single_investment_rule)
 
     # ======== Ramping Constraints ========
 
@@ -565,7 +560,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     # Energy Ratio
     def energy_ratio_rule(model, h):
-        return model.electricity_production[h] == (model.heat_production[h] * energy_ratio) * model.electrical_efficiency[h]
+        return model.electricity_production[h] == (model.heat_production[h] * energy_ratio) * 1
     model.energy_ratio_constraint = Constraint(model.HOURS, rule=energy_ratio_rule)
 
 # ======== CO2 Constraints ========
@@ -665,12 +660,13 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS) * 0.6
 
         production_revenue = sum(model.production_output[h] for h in model.HOURS)
-        ancillary_revenue = sum(reward[h] * (model.elec_reduction_by_CHP[h]) for h in model.HOURS)
-        all_shortfall_penalty = sum(shortfall_penalty[h] * model.grid_reduction_shortfall[h] for h in model.HOURS)
+        ancillary_revenue = sum(reward[h] * (model.elec_reduction_by_CHP[h]) for h in model.HOURS) * 10
+        all_shortfall_penalty = sum(shortfall_penalty[h] * model.grid_reduction_shortfall[h] for h in model.HOURS) * 0
 
 
         return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + all_shortfall_penalty - (elec_sold + heat_sold + carbon_sold + production_revenue + ancillary_revenue)
     model.objective = Objective(rule=objective_rule, sense=minimize)
+    
     # -------------- Solver --------------
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
