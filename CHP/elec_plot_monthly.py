@@ -1,8 +1,13 @@
 from pyomo.environ import *
 import pandas as pd
 import dash
+import sys
 from dash import dcc, html, Input, Output, State  # Combined into a single line
 import os
+# Add the config directory to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Import the solver options
+from solver_options import get_solver
 import numpy as np
 import locale
 import gc
@@ -32,7 +37,7 @@ capex = pd.read_excel(capex_path, nrows=10000)
 electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
-electricity_market = markets["elec"].to_numpy() * 10
+electricity_market = markets["elec"].to_numpy() * 1
 electricity_market_sold = markets["elec_sold"].to_numpy()
 
 carbon_market = markets["carbon"].to_numpy() * 1
@@ -673,13 +678,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost + eb_investment_cost - (elec_sold + heat_sold + carbon_sold)
     model.objective = Objective(rule=objective_rule, sense=minimize)
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi", solver_io='direct')
-    solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 16
-    solver.options["LPWarmStart"] = 2
-    solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.01
+    solver = get_solver(time_limit)  # Use the imported solver configuration
     solver.solve(model, tee=True, symbolic_solver_labels=False)
 
         # Extract results after solving the monthly model

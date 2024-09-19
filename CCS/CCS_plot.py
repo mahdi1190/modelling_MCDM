@@ -188,13 +188,8 @@ def pyomomodel():
 
 
     # -------------- Solver --------------
-    solvere="gurobi"
-    solver = SolverFactory(solvere)
-    if solvere == "gurobi":
-        solver.options['NonConvex'] = 2
-        solver.options['TimeLimit'] = 60
-        solver.options["Threads"]= 16
-    solver.solve(model, tee=True)
+    solver = get_solver(time_limit)  # Use the imported solver configuration
+    solver.solve(model, tee=True, symbolic_solver_labels=False)
 
     return model
 

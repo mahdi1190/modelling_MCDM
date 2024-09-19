@@ -6,6 +6,11 @@ locale.setlocale(locale.LC_ALL, '')
 import os
 import numpy as np
 from dash import dcc, html, Input, Output
+import sys
+# Add the config directory to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Import the solver options
+from solver_options import get_solver
 
 # Initialize Dash app
 last_mod_time = 0
@@ -682,14 +687,8 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     
     model.objective = Objective(rule=objective_rule, sense=minimize)
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi")
-    solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 16
-    solver.options["LPWarmStart"] = 2
-    solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.01
-    solver.solve(model, tee=True)
+    solver = get_solver(time_limit)  # Use the imported solver configuration
+    solver.solve(model, tee=True, symbolic_solver_labels=False)
     return model
 
 

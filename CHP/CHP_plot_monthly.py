@@ -6,6 +6,11 @@ import os
 import numpy as np
 import locale
 import gc
+import sys
+# Add the config directory to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Import the solver options
+from solver_options import get_solver
 gc.disable()  # Disable garbage collection temporarily
 
 locale.setlocale(locale.LC_ALL, '')  # Setting locale once here
@@ -655,13 +660,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         return (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM) + elec_cost + carbon_cost + h2_investment_cost - (elec_sold + heat_sold + carbon_sold)
     model.objective = Objective(rule=objective_rule, sense=minimize)
     # -------------- Solver --------------
-    solver = SolverFactory("gurobi", solver_io='direct')
-    solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 16
-    solver.options["LPWarmStart"] = 2
-    solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.001
+    solver = get_solver(time_limit)  # Use the imported solver configuration
     solver.solve(model, tee=True, symbolic_solver_labels=False)
 
         # Extract results after solving the monthly model

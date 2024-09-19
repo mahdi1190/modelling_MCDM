@@ -2,7 +2,10 @@ from pyomo.environ import *
 import pandas as pd
 import os
 import numpy as np
-
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Import the solver options
+from solver_options import get_solver
 current_dir = os.path.dirname(__file__)
 # Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
 demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'optimized_demands.xlsx'))
@@ -159,15 +162,8 @@ def pyomomodel():
         return fuel_cost_NG
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
-    # Solver options
-    solver = SolverFactory("gurobi")
-    solver.options['NonConvex'] = 2
-    solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"] = 16
-    solver.options["LPWarmStart"] = 2
-    solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.01
-    solver.solve(model, tee=True)
+    solver = get_solver(time_limit)  # Use the imported solver configuration
+    solver.solve(model, tee=True, symbolic_solver_labels=False)
 
     return model
 

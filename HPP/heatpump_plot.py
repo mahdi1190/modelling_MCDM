@@ -5,7 +5,10 @@ import locale
 locale.setlocale( locale.LC_ALL, '' )
 import os
 import numpy as np
-print("hi1")
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
+# Import the solver options
+from solver_options import get_solver
 demands = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\demands.xlsx")
 markets = pd.read_excel(r"C:\Users\Sheikh M Ahmed\modelling_MCDM\data\markets.xlsx")
 
@@ -154,13 +157,8 @@ def pyomomodel():
 
 
     # -------------- Solver --------------
-    solvere="gurobi"
-    solver = SolverFactory(solvere)
-    if solvere == "gurobi":
-        solver.options['NonConvex'] = 2
-        solver.options['TimeLimit'] = 100
-        solver.options["Threads"] = 16
-    solver.solve(model, tee=True)
+    solver = get_solver(time_limit)  # Use the imported solver configuration
+    solver.solve(model, tee=True, symbolic_solver_labels=False)
 
     return model
 
