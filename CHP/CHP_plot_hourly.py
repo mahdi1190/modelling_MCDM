@@ -675,7 +675,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     solver = SolverFactory("gurobi")
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
-    solver.options["Threads"]= 16
+    solver.options["Threads"]= 32
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
     solver.options['mipgap'] = 0.01
