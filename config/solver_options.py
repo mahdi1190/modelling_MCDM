@@ -10,12 +10,15 @@ def get_solver(time_limit):
     Returns:
     solver: Configured Gurobi solver instance.
     """
-    solver = SolverFactory("gurobi", solver_io='direct')
+    solver = SolverFactory("gurobi", solver_io='direct', executable='C:/gurobi1200/win64/gurobi_cl')
     solver.options['NonConvex'] = 2
     solver.options['TimeLimit'] = time_limit
     solver.options["Threads"] = 32
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.01
+    solver.options['mipgap'] = 0.001
+    solver.options['Presolve'] = 2  # Gurobi's highest level of presolve
+    solver.options['ConcurrentMIP'] = 2
+
     
     return solver

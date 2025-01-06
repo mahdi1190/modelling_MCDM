@@ -1,0 +1,314 @@
+{
+  "start_date": "2024-01-01",
+  "end_date": "2054-12-31",
+  "start_year": 2024,
+  "random_seed": 42,
+  "hourly_dataset_filename": "updated_energy_market_dataset.csv",
+  "monthly_dataset_filename": "monthly_average_energy_market_dataset.csv",
+  "capex_dataset_filename": "capex_costs_over_time.csv",
+
+  "electricity_base_price": 0.18,
+  "natural_gas_base_price": 0.06,
+  "hydrogen_base_price_per_kg": 5.50,
+  "biomass_base_price_per_tonne": 450.00,
+  "carbon_credit_cap_base": 6000,
+
+  "hydrogen_energy_content": 33.33,
+  "biomass_energy_content_per_tonne": 4500,
+
+  "electricity_annual_growth": -0.005,
+  "electricity_ev_start_year": 2030,
+  "electricity_ev_increase": 0.0,
+  "natural_gas_annual_growth": 0.015,
+  "hydrogen_annual_change": -0.03,
+  "biomass_annual_change": 0.02,
+  "biomass_demand_increase_start_year": 2025,
+  "biomass_additional_annual_increase": 0.005,
+  "carbon_credit_cap_annual_decline": -0.05,
+
+  "seasonality": {
+    "winter_months": [11, 12, 1, 2, 3],
+    "summer_months": [6, 7, 8],
+    "winter_increase": 0.15,
+    "summer_decrease": 0.10
+  },
+
+  "electricity_volatility_base": 0.05,
+  "natural_gas_volatility": 0.10,
+  "biomass_volatility": 0.05,
+  "hydrogen_volatility": 0.08,
+  "carbon_credit_volatility": 0.05,
+
+  "renewable_share": {
+    "start_year": 2024,
+    "end_year": 2040,
+    "start_share": 0.20,
+    "end_share": 0.80
+  },
+  
+  "renewable_volatility": {
+    "max_volatility_increase": 0.10,
+    "tech_improvement_start_year": 2035,
+    "tech_volatility_reduction_rate": 0.015
+  },
+
+  "grid_carbon_intensity": {
+    "base_intensity": 0.5,
+    "target_intensity": 0.05,
+    "variation": {
+      "daily_cycle": true,
+      "peak_hours": [17, 18, 19, 20],
+      "peak_multiplier": 1.1,
+      "off_peak_multiplier": 0.9
+    }
+  },
+
+  "natural_gas_carbon_intensity": {
+    "base_intensity": 0.2,
+    "peak_intensity": 0.25,
+    "transition_start_year": 2025,
+    "transition_end_year": 2030
+  },
+
+  "hydrogen_carbon_intensity": {
+    "base_intensity": 0.12,
+    "target_intensity": 0.02,
+    "transition_start_year": 2030,
+    "transition_end_year": 2040
+  },
+
+  "biomass_carbon_intensity": {
+    "fixed_intensity": 0.01
+  },
+
+  "hydrogen_correlation_base": 0.5,
+  "hydrogen_correlation_max": 0.95,
+  
+  "natural_gas_correlation_base": 0.6,
+  "natural_gas_correlation_min": 0.1,
+
+  "biomass_natural_gas_correlation_base": 0.2,
+  "biomass_natural_gas_correlation_change_per_year": 0.01,
+  "biomass_natural_gas_correlation_max": 0.5,
+
+  "ccs_start_year": 2030,
+  "ccs_max_reduction": 0.5,
+  "ccs_annual_increase": 0.015,
+
+  "carbon_tax_start_year": 2028,
+  "carbon_tax_start_rate": 30,
+  "carbon_tax_increase": 5,
+  "carbon_tax_increase_interval": 5,
+
+  "carbon_credit_base_price": 80.00,
+  "carbon_credit_price_target": 200.00,
+  "carbon_credit_price_projection_year": 2050,
+
+  "renewable_capacity_increase": {
+    "start_year": 2025,
+    "price_adjustment": -0.005
+  },
+
+  "demand_shocks": {
+    "frequency_per_year": 2,
+    "impact_range": [0.95, 1.05]
+  },
+
+  "exchange_rate_volatility": 0.02,
+  "exchange_rate_trend": 0.001,
+
+  "economic_cycles": [
+    {
+      "name": "Recession",
+      "start_date": "2027-01-01",
+      "end_date": "2028-12-31",
+      "impact": {
+        "Electricity Price ($/kWh)": 0.95,
+        "Natural Gas Price ($/kWh)": 0.90,
+        "Biomass Price ($/kWh)": 0.92
+      }
+    },
+    {
+      "name": "Economic Boom",
+      "start_date": "2032-01-01",
+      "end_date": "2035-12-31",
+      "impact": {
+        "Electricity Price ($/kWh)": 1.05,
+        "Natural Gas Price ($/kWh)": 1.10,
+        "Biomass Price ($/kWh)": 1.08
+      }
+    }
+  ],
+
+  "speculative_commodities": [
+    "Electricity Price ($/kWh)",
+    "Natural Gas Price ($/kWh)",
+    "Carbon Credit Price ($/tonne CO2)"
+  ],
+  "speculation_spike_probability": 0.01,
+  "speculation_spike_multiplier": 1.2,
+
+  "inflation_rates": {
+    "2024": 0.02, "2025": 0.018, "2026": 0.022, "2027": 0.019, "2028": 0.021,
+    "2029": 0.02, "2030": 0.023, "2031": 0.019, "2032": 0.02, "2033": 0.021,
+    "2034": 0.022, "2035": 0.018, "2036": 0.02, "2037": 0.019, "2038": 0.021,
+    "2039": 0.02, "2040": 0.023, "2041": 0.019, "2042": 0.02, "2043": 0.021,
+    "2044": 0.022, "2045": 0.018, "2046": 0.02, "2047": 0.019, "2048": 0.021,
+    "2049": 0.02, "2050": 0.023, "2051": 0.019, "2052": 0.02, "2053": 0.021,
+    "2054": 0.022
+  },
+
+  "events": [
+    {
+      "name": "Energy Crisis 1",
+      "start_date": "2029-10-01",
+      "end_date": "2030-03-31",
+      "impacts": {
+        "Natural Gas Price ($/kWh)": 2.0,
+        "Electricity Price ($/kWh)": 2.5,
+        "Hydrogen Price ($/kWh)": 2.5
+      }
+    },
+    {
+      "name": "Carbon Border Adjustment Mechanism (CBAM)",
+      "start_date": "2030-01-01",
+      "end_date": "2054-12-31",
+      "impacts": {
+        "Carbon Credit Price ($/tonne CO2)": 1.2
+      }
+    },
+    {
+      "name": "Severe Winter Storm",
+      "start_date": "2032-01-01",
+      "end_date": "2032-01-31",
+      "impacts": {
+        "Electricity Price ($/kWh)": 1.15,
+        "Natural Gas Price ($/kWh)": 1.20
+      }
+    },
+    {
+      "name": "Biomass Subsidies",
+      "start_date": "2032-01-01",
+      "end_date": "2054-12-31",
+      "impacts": {
+        "Biomass Price ($/kWh)": 0.95
+      }
+    },
+    {
+      "name": "Supply Chain Disruption",
+      "start_date": "2035-01-01",
+      "end_date": "2035-12-31",
+      "impacts": {
+        "Biomass Price ($/kWh)": 1.25,
+        "Natural Gas Price ($/kWh)": 1.25
+      }
+    },
+    {
+      "name": "Hydrogen Production Breakthrough",
+      "start_date": "2035-01-01",
+      "end_date": "2054-12-31",
+      "impacts": {
+        "Hydrogen Price ($/kWh)": 0.85
+      }
+    },
+    {
+      "name": "Post-Crisis Adjustments",
+      "start_date": "2041-05-01",
+      "end_date": "2054-12-31",
+      "impacts": {
+        "Electricity Price ($/kWh)": 0.98
+      }
+    },
+    {
+      "name": "Heatwave",
+      "start_date": "2045-07-01",
+      "end_date": "2045-07-31",
+      "impacts": {
+        "Electricity Price ($/kWh)": 1.10
+      }
+    },
+    {
+      "name": "Global Carbon Pricing",
+      "start_date": "2030-01-01",
+      "end_date": "2054-12-31",
+      "impacts": {
+        "Natural Gas Price ($/kWh)": 1.05,
+        "Biomass Price ($/kWh)": 1.03
+      }
+    },
+    {
+      "name": "Gradual Carbon Credit Reduction",
+      "start_date": "2040-01-01",
+      "end_date": "2045-12-31",
+      "impacts": {
+        "Carbon Credit Price ($/tonne CO2)": {
+          "change_per_period": -0.01,
+          "frequency": "YS"
+        }
+      }
+    }
+  ],
+
+  "gradual_adjustments": [
+    {
+      "start_date": "2025-01-01",
+      "end_date": "2028-12-31",
+      "variable": "Electricity Price ($/kWh)",
+      "change_per_period": -0.005,
+      "frequency": "MS"
+    },
+    {
+      "start_date": "2030-01-01",
+      "end_date": "2035-12-31",
+      "variable": "Hydrogen Price ($/kWh)",
+      "change_per_period": -0.01,
+      "frequency": "YS"
+    }
+  ],
+
+  "capex": {
+    "Electric Boiler": {
+      "base_cost": 200,
+      "cost_unit": "$/kW",
+      "learning_rate": 0.05,
+      "initial_installed_capacity": 500000,
+      "annual_capacity_growth_rate": 0.10,
+      "events": [
+        {
+          "name": "Technological Breakthrough in Electric Boilers",
+          "start_year": 2030,
+          "cost_reduction": 0.10
+        }
+      ]
+    },
+    "Hydrogen CHP Retrofit": {
+      "base_cost": 300,
+      "cost_unit": "$/kW",
+      "learning_rate": 0.07,
+      "initial_installed_capacity": 200000,
+      "annual_capacity_growth_rate": 0.15,
+      "events": [
+        {
+          "name": "Mass Adoption of Hydrogen Technologies",
+          "start_year": 2035,
+          "end_year": 2040,
+          "change_per_period": -0.02
+        }
+      ]
+    },
+    "CCS System": {
+      "base_cost": 50,
+      "cost_unit": "$/tonne CO2/year",
+      "learning_rate": 0.08,
+      "initial_installed_capacity": 10000000,
+      "annual_capacity_growth_rate": 0.12,
+      "events": [
+        {
+          "name": "CCS Subsidies Introduced",
+          "start_year": 2028,
+          "cost_reduction": 0.20
+        }
+      ]
+    }
+  }
+}
