@@ -733,7 +733,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
             model.fuel_blend_biomass[get_interval(h)] * BM_market[h] * model.fuel_consumed[h]
             for h in model.HOURS
         )
-
+#ok
         # Carbon costs and credits
         carbon_cost = sum(
             model.carbon_credits[i] * carbon_market[i]
