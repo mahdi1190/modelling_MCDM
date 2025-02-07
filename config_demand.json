@@ -1,0 +1,64 @@
+{
+  "simulation": {
+    "hourly": {
+      "start_date": "2025-01-01 00:00:00",
+      "end_date": "2025-12-31 23:00:00"
+    },
+    "years": 30
+  },
+  "demands": {
+    "thermal": {
+      "annual_total_MWh": 80000,
+      "average_MWh_per_hour": 9.13,
+      "seasonality": {
+        "amplitude": 0.15,
+        "phase_shift": 0
+      },
+      "noise_std": 0.2,
+      "downtime_baseline": 0.0
+    },
+    "electricity": {
+      "annual_total_MWh": 20000,
+      "average_MWh_per_hour": 2.28,
+      "daily_cycle": {
+        "amplitude": 0.5,
+        "peak_hour": 14,
+        "trough_hour": 4
+      },
+      "noise_std": 0.1,
+      "downtime_baseline": 0.3
+    },
+    "refrigeration": {
+      "annual_total_MWh": 5000,
+      "average_MWh_per_hour": 0.57,
+      "daily_cycle": {
+        "amplitude": 0.2,
+        "peak_hour": 16,
+        "trough_hour": 6
+      },
+      "noise_std": 0.05,
+      "downtime_baseline": 0.3
+    }
+  },
+  "grid_reduction": {
+    "base_request_MWh": 0.3,
+    "daily_cycle": {
+      "peak_hour": 18,
+      "amplitude": 0.5
+    },
+    "winter_multiplier": 1.5,
+    "noise_std": 0.05,
+    "trigger_probability": 0.1
+  },
+  "downtime": {
+    "maintenance": {
+      "start_day_of_year": 200,
+      "duration_hours": 168
+    },
+    "emergency": {
+      "number_of_events": 2,
+      "min_duration_hours": 24,
+      "max_duration_hours": 72
+    }
+  }
+}
