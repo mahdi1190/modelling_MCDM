@@ -22,14 +22,14 @@ last_mod_time = 0
 current_dir = os.path.dirname(__file__)
 
 # Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
-demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands_monthly_30.xlsx'))
+demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands_monthly_30.csv'))
 markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.csv'))
 markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.csv'))  # Corrected path
 
 capex_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'capex_costs_over_time.csv'))  # Corrected path
 unit_conv = 1E3
 # Read the Excel files
-demands = pd.read_excel(demands_path, nrows=361)
+demands = pd.read_csv(demands_path, nrows=361)
 markets_monthly = pd.read_csv(markets_monthly_path, nrows=361)
 capex = pd.read_csv(capex_path, nrows=361)
 
@@ -37,13 +37,13 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
-electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv
-electricity_market_sold = electricity_market * 0
+electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv * 0.5
+electricity_market_sold = electricity_market * 1E-3
 
 carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy() 
 
 NG_market = markets_monthly["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
-heat_market_sold = NG_market * 0
+heat_market_sold = NG_market * 1E-3
 H2_market = markets_monthly["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
 BM_market = markets_monthly["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
@@ -52,7 +52,7 @@ em_h2 = markets_monthly["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
 
-CHP_capacity = 5000
+CHP_capacity = 12000
 
 energy_ratio = 0.25
 
@@ -332,9 +332,9 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.INTERVALS = Set(initialize=INTERVALS)
 
     # Storage
-    storage_efficiency = 0.8 # 
-    withdrawal_efficiency = 0.8 # 
-    max_storage_capacity = 1000 #kW
+    storage_efficiency = 0.5 # 
+    withdrawal_efficiency = 0.5 # 
+    max_storage_capacity = 0 #kW
     heat_storage_loss_factor = 0.95  # %/timestep
 
     # Refrigeration
@@ -356,10 +356,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
     eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
 
-
-    # Co2 params
-    co2_per_unit_ng = 0.37  # kg CO2 per kW of fuel
-    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]*0  # tonnes CO2
+    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]  # tonnes CO2
     M = 1E8
 
     # CO2 stream properties (can be varied)
@@ -472,7 +469,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # --- Parameters ---
     # Calculate total_fuel_co2_ub
     fuel_consumed_ub = model.fuel_consumed[0].ub  # Assuming all m have the same upper bound
-    total_fuel_co2_ub = co2_per_unit_ng * fuel_consumed_ub
+    total_fuel_co2_ub = fuel_consumed_ub
 
     # --- Define Variables ---
     # Auxiliary variable for product
@@ -489,7 +486,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
  # -------------- Constraints --------------
     # Heat Balance
     def heat_balance_rule(model, m):
-        return model.heat_production[m] >= (model.heat_over_production[m] + model.useful_heat[m])
+        return model.heat_production[m] * (1-acti) >= (model.heat_over_production[m] + model.useful_heat[m])
     model.heat_balance = Constraint(model.MONTHS, rule=heat_balance_rule)
 
     # Heat Demand
@@ -532,11 +529,11 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.capacity_constraint = Constraint(model.MONTHS, rule=capacity_rule)
 
     def fuel_energy_rule(model, m):
-        return model.fuel_energy[m] == model.fuel_blend_ng[m] * 11.1 + model.fuel_blend_h2[m] * 3.6 + model.fuel_blend_biomass[m] * 9.7
+        return model.fuel_energy[m] == model.fuel_blend_ng[m] + model.fuel_blend_h2[m] + model.fuel_blend_biomass[m]
     model.fuel_energy_rule_con = Constraint(model.MONTHS, rule=fuel_energy_rule)
     # Fuel Consumption
     def fuel_consumed_rule(model, m):
-        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) == model.heat_production[m]
+        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * 0.7 == model.heat_production[m]
     model.fuel_consumed_rule_con = Constraint(model.MONTHS, rule=fuel_consumed_rule)
 
     def electrical_efficiency_rule(model, m):
@@ -596,7 +593,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.active_eb_constraint = Constraint(model.INTERVALS, rule=active_eb_rule)
 
     def single_investment_rule_eb(model):
-        return sum(model.invest_time_eb[i] for i in model.INTERVALS) <= model.invest_eb  # Allow for flexibility
+        return sum(model.invest_time_eb[i] for i in model.INTERVALS) == model.invest_eb  # Allow for flexibility
     model.single_investment_eb_constraint = Constraint(rule=single_investment_rule_eb)
 
     # Initial Heat Stored
@@ -757,7 +754,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Adjust Electricity Production Constraint to include CCS energy penalty
     def electricity_production_constraint(model, m):
-        return model.electricity_production[m] == (model.heat_production[m] * energy_ratio) * 0.6
+        return model.electricity_production[m] == (model.heat_production[m] * energy_ratio)
     model.electricity_production_constraint = Constraint(model.MONTHS, rule=electricity_production_constraint)
 
     # CCS Transport and Storage Costs

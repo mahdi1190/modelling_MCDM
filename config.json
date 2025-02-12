@@ -3,15 +3,15 @@
   "end_date": "2055-12-31",
   "start_year": 2025,
   "random_seed": 42,
-  "hourly_dataset_filename": "updated_energy_market_dataset.csv",
-  "monthly_dataset_filename": "monthly_average_energy_market_dataset.csv",
+  "hourly_dataset_filename": "markets.csv",
+  "monthly_dataset_filename": "markets_monthly.csv",
   "capex_dataset_filename": "capex_costs_over_time.csv",
 
   "electricity_base_price": 0.12,
   "natural_gas_base_price": 0.03,
   "hydrogen_base_price_per_kg": 6.50,
   "biomass_base_price_per_tonne": 450.00,
-  "carbon_credit_cap_base": 150000,
+  "carbon_credit_cap_base": 15000,
 
   "hydrogen_energy_content": 33.33,
   "biomass_energy_content_per_tonne": 4500,
@@ -25,7 +25,7 @@
   "biomass_annual_change": 0.02,
   "biomass_demand_increase_start_year": 2025,
   "biomass_additional_annual_increase": 0.005,
-  "carbon_credit_cap_annual_decline": -0.05,
+  "carbon_credit_cap_annual_decline": -0.07,
 
   "seasonality": {
     "winter_months": [11, 12, 1, 2, 3],
@@ -38,7 +38,7 @@
   "natural_gas_volatility": 0.10,
   "biomass_volatility": 0.05,
   "hydrogen_volatility": 0.08,
-  "carbon_credit_volatility": 0.05,
+  "carbon_credit_volatility": 0.1,
 
   "renewable_share": {
     "start_year": 2025,
@@ -102,8 +102,8 @@
   "carbon_tax_increase_interval": 5,
 
   "carbon_credit_base_price": 80.00,
-  "carbon_credit_price_target": 140.00,
-  "carbon_credit_price_projection_year": 2055,
+  "carbon_credit_price_target": 200.00,
+  "carbon_credit_price_projection_year": 2050,
 
   "renewable_capacity_increase": {
     "start_year": 2025,
@@ -264,10 +264,10 @@
     {
       "name": "Gradual Carbon Credit Reduction",
       "start_date": "2040-01-01",
-      "end_date": "2045-12-31",
+      "end_date": "2055-12-31",
       "impacts": {
         "Carbon Credit Price ($/tonne CO2)": {
-          "change_per_period": -0.01,
+          "change_per_period": -0.02,
           "frequency": "YS"
         }
       }

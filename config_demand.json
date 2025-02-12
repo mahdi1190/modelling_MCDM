@@ -48,7 +48,11 @@
     },
     "winter_multiplier": 1.5,
     "noise_std": 0.05,
-    "trigger_probability": 0.1
+    "trigger_probability": 0.1,
+    "base_reduction_price": 0.05,
+    "price_noise_std": 0.005,
+    "base_penalty_rate": 0.1,
+    "penalty_noise_std": 0.01
   },
   "downtime": {
     "maintenance": {

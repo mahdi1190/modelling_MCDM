@@ -1,4 +1,13 @@
-Investment Type,Investment Made,Investment Intervals,Investment Months
-H2,0.0,[],[]
-EB,1.0,[np.int64(0)],[np.int64(0)]
-CCS,0.0,[],[]
+Interval,Active H2,Active EB,Active CCS
+0,0,1,0
+1,0,1,0
+2,0,1,0
+3,0,1,0
+4,0,1,0
+5,0,1,0
+6,0,1,0
+7,0,1,0
+8,0,1,0
+9,0,1,0
+10,0,1,0
+11,0,1,0

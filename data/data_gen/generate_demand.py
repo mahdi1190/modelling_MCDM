@@ -47,7 +47,7 @@ def add_downtime(timestamps, maintenance, emergency):
     return downtime_flag
 
 def grid_reduction_request(ts, elec_avg, grid_cfg):
-    # Only trigger a grid reduction request with a certain probability.
+    # Only trigger a reduction request with a given probability.
     if random.random() < grid_cfg.get("trigger_probability", 0.1):
         amplitude = grid_cfg["daily_cycle"]["amplitude"]
         peak_hour = grid_cfg["daily_cycle"]["peak_hour"]
@@ -57,8 +57,33 @@ def grid_reduction_request(ts, elec_avg, grid_cfg):
         base_request = grid_cfg["base_request_MWh"]
         reduction = base_request * daily * seasonal + noise
         reduction = max(0, reduction)
-        # Optionally, threshold very small values to 0.
         return reduction if reduction >= 0.1 else 0
+    else:
+        return 0
+
+def grid_reduction_price(ts, grid_cfg):
+    # Only provide a price if a reduction request is triggered (same probability)
+    if random.random() < grid_cfg.get("trigger_probability", 0.1):
+        amplitude = grid_cfg["daily_cycle"]["amplitude"]
+        peak_hour = grid_cfg["daily_cycle"]["peak_hour"]
+        daily = 1 + amplitude * np.cos(2 * np.pi * ((ts.hour - peak_hour) / 24.0))
+        seasonal = grid_cfg["winter_multiplier"] if ts.month in [12, 1, 2] else 1.0
+        noise = np.random.normal(0, grid_cfg["price_noise_std"])
+        price = grid_cfg["base_reduction_price"] * daily * seasonal + noise
+        return max(0, price) if price >= 0.001 else 0
+    else:
+        return 0
+
+def grid_penalty_rate(ts, grid_cfg):
+    # Only provide a penalty if a reduction request is triggered.
+    if random.random() < grid_cfg.get("trigger_probability", 0.1):
+        amplitude = grid_cfg["daily_cycle"]["amplitude"]
+        peak_hour = grid_cfg["daily_cycle"]["peak_hour"]
+        daily = 1 + amplitude * np.cos(2 * np.pi * ((ts.hour - peak_hour) / 24.0))
+        seasonal = grid_cfg["winter_multiplier"] if ts.month in [12, 1, 2] else 1.0
+        noise = np.random.normal(0, grid_cfg["penalty_noise_std"])
+        penalty = grid_cfg["base_penalty_rate"] * daily * seasonal + noise
+        return max(0, penalty) if penalty >= 0.001 else 0
     else:
         return 0
 
@@ -74,29 +99,39 @@ def generate_hourly_data(timestamps, config):
     df = pd.DataFrame(index=timestamps)
     
     # Thermal demand (MWh/h)
-    df['thermal_demand'] = [
+    df['heat'] = [
         thermal_cfg["average_MWh_per_hour"] * seasonal_factor(ts, thermal_cfg["seasonality"]["amplitude"], thermal_cfg["seasonality"]["phase_shift"]) +
         np.random.normal(0, thermal_cfg["noise_std"])
         for ts in timestamps
     ]
     
     # Electricity demand (MWh/h)
-    df['electricity_demand'] = [
+    df['elec'] = [
         elec_cfg["average_MWh_per_hour"] * daily_cycle(ts.hour, elec_cfg["daily_cycle"]["amplitude"], elec_cfg["daily_cycle"]["peak_hour"]) +
         np.random.normal(0, elec_cfg["noise_std"])
         for ts in timestamps
     ]
     
     # Refrigeration demand (MWh/h)
-    df['refrigeration_demand'] = [
+    df['cool'] = [
         refrig_cfg["average_MWh_per_hour"] * daily_cycle(ts.hour, refrig_cfg["daily_cycle"]["amplitude"], refrig_cfg["daily_cycle"]["peak_hour"]) +
         np.random.normal(0, refrig_cfg["noise_std"])
         for ts in timestamps
     ]
     
-    # Grid reduction request (MWh/h) – mostly zero
-    df['grid_reduction_request'] = [
+    # Grid reduction request (MWh/h)
+    df['request'] = [
         grid_reduction_request(ts, elec_cfg["average_MWh_per_hour"], grid_cfg)
+        for ts in timestamps
+    ]
+    
+    # Grid reduction price (currency per kWh) and penalty rate (currency per kWh)
+    df['revenue'] = [
+        grid_reduction_price(ts, grid_cfg)
+        for ts in timestamps
+    ]
+    df['penalty'] = [
+        grid_penalty_rate(ts, grid_cfg)
         for ts in timestamps
     ]
     
@@ -104,29 +139,29 @@ def generate_hourly_data(timestamps, config):
     downtime = add_downtime(timestamps, maintenance_cfg, emergency_cfg)
     df['downtime'] = downtime
     
-    # During downtime: thermal demand becomes 0; electricity and refrigeration drop to a fraction.
-    df.loc[downtime, 'thermal_demand'] *= thermal_cfg.get("downtime_baseline", 0)
-    df.loc[downtime, 'electricity_demand'] *= elec_cfg.get("downtime_baseline", 0)
-    df.loc[downtime, 'refrigeration_demand'] *= refrig_cfg.get("downtime_baseline", 0)
+    # During downtime: thermal demand becomes 0; electricity and refrigeration drop to a baseline fraction.
+    df.loc[downtime, 'heat'] *= thermal_cfg.get("downtime_baseline", 0)
+    df.loc[downtime, 'elec'] *= elec_cfg.get("downtime_baseline", 0)
+    df.loc[downtime, 'cool'] *= refrig_cfg.get("downtime_baseline", 0)
     
     return df
 
 # Generate one-year hourly dataset (8760 hours)
 one_year_data = generate_hourly_data(one_year_hours, config)
 one_year_data.index.name = 'timestamp'
-one_year_data.to_csv("hourly_demand_data_1year.csv")
-print("One-year hourly demand dataset saved as 'hourly_demand_data_1year.csv'.")
+one_year_data.to_csv("data/demands_hourly_year.csv")
+print("One-year hourly demand dataset saved as 'data/demands_hourly_year.csv'.")
 
 # Generate multi-year hourly dataset (30 years + 1 month)
 multi_year_data = generate_hourly_data(multi_year_hours, config)
 multi_year_data.index.name = 'timestamp'
-multi_year_data.to_csv("hourly_demand_data_30years.csv")
-print("30-year hourly demand dataset (with extra month) saved as 'hourly_demand_data_30years.csv'.")
+multi_year_data.to_csv("data/demands.csv")
+print("30-year hourly demand dataset (with extra month) saved as 'data/demands.csv'.")
 
-# Generate monthly aggregated dataset by summing the hourly data.
-# Create a monthly index starting from 2025-01-01 with 361 periods.
+# Generate monthly aggregated dataset for the multi-year dataset.
+# Sum all hourly values in each month.
 monthly_index = pd.date_range(start="2025-01-01", periods=361, freq='MS')
 monthly_data = multi_year_data.resample('MS').sum().reindex(monthly_index)
 monthly_data.index.name = 'month'
-monthly_data.to_csv("monthly_demand_data_30years.csv")
-print("Monthly demand dataset saved as 'monthly_demand_data_30years.csv'.")
+monthly_data.to_csv("data/demands_monthly_30.csv")
+print("Monthly demand dataset saved as 'demands_monthly_30.csv'.")

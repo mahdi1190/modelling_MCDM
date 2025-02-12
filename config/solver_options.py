@@ -16,7 +16,7 @@ def get_solver(time_limit):
     solver.options["Threads"] = 16
     solver.options["LPWarmStart"] = 2
     solver.options["FuncNonlinear"] = 1
-    solver.options['mipgap'] = 0.001
+    solver.options['mipgap'] = 0.01
     solver.options['Presolve'] = 2  # Gurobi's highest level of presolve
     solver.options['ConcurrentMIP'] = 2
 

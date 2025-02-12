@@ -21,8 +21,8 @@ last_mod_time = 0
 current_dir = os.path.dirname(__file__)
 
 # Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
-demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands.xlsx'))
-markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.xlsx'))
+demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands.csv'))
+markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.csv'))
 markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.xlsx'))  # Corrected path
 load_shedding_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'load_shedding.xlsx'))  # Corrected path
 
