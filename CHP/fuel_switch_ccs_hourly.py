@@ -53,7 +53,7 @@ electricity_market_sold = electricity_market * 0
 carbon_market = markets["Carbon Credit Price ($/tonne CO2)"].to_numpy()
 NG_market = markets["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 0
-H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
+H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv * 1E-3
 BM_market = markets["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
 em_bm = markets["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
@@ -362,7 +362,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     capital_cost_per_kw = 1000    # $/kW
     fuel_energy = 1              # (since fuel blends sum to 1)
-    max_ramp_rate = 5000         # kW per timestep
+    max_ramp_rate = 1        # kW per timestep
 
     TEMP = 700
     PRES = 50
@@ -406,7 +406,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.active_eb = Param(model.INTERVALS, within=Binary, mutable=True, default=1)
     active_eb = 0
     active_h2 = 0
-    active_ccs = 1
+    active_ccs = 0
     model.active_ccs = Param(model.INTERVALS, within=Binary, mutable=True, default=0)
 
     # ----------------- Decision Variables -----------------

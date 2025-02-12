@@ -49,7 +49,7 @@ electricity_market_sold = electricity_market * 1E-3
 carbon_market = markets["Carbon Credit Price ($/tonne CO2)"].to_numpy()
 NG_market = markets["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 1E-3
-H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
+H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv * 1E-3
 BM_market = markets["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
 em_bm = markets["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
