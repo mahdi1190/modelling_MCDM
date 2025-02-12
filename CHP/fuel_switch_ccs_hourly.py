@@ -53,7 +53,7 @@ electricity_market_sold = electricity_market * 0
 carbon_market = markets["Carbon Credit Price ($/tonne CO2)"].to_numpy()
 NG_market = markets["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 0
-H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv * 1E-3
+H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
 BM_market = markets["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
 em_bm = markets["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
@@ -61,8 +61,9 @@ em_h2 = markets["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
 
+max_co2_emissions = markets["Effective Carbon Credit Cap"] / 12 # tonnes CO2
 # Other model parameters
-CHP_capacity = 18000
+CHP_capacity = 15
 energy_ratio = 0.25
 
 app = dash.Dash(__name__)
@@ -388,8 +389,6 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     transport_cost_per_kg_co2 = 0.05   # $ per kg CO₂ transported
     storage_cost_per_kg_co2 = 0.03     # $ per kg CO₂ stored
 
-    # max_co2_emissions provided as an hourly array (placeholder)
-    max_co2_emissions = np.full(total_hours, 1000)
     M = 1E6
 
     # Adjusted capture efficiency (computed outside constraints)

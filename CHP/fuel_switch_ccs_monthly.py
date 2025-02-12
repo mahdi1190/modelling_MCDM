@@ -37,7 +37,7 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
-electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv * 0.5
+electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
 electricity_market_sold = electricity_market * 1E-3
 
 carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy() 
@@ -51,12 +51,10 @@ em_bm = markets_monthly["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_h2 = markets_monthly["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
-
+res_emissions = 15000
 CHP_capacity = 12000
 
 energy_ratio = 0.25
-
-deltaH_steam = 3000
 
 app = dash.Dash(__name__)
 
@@ -355,9 +353,10 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
     eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
+    ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 14000
 
     max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]  # tonnes CO2
-    M = 1E8
+    M = 1E6
 
     # CO2 stream properties (can be varied)
     co2_stream_temp = 400  # CO2 stream temperature (in Kelvin)
@@ -373,20 +372,9 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     )
     adjusted_capture_efficiency_value = base_capture_efficiency * stream_factor
 
-    # Stream-Dependent CCS Capital Cost
-    # Time-indexed CAPEX for CCS investment
-    capex_factor = (
-        (1 + 0.001 * (co2_stream_temp - 300)) *
-        (1 - 0.02 * (co2_stream_pressure - 10))
-    )
-    ccs_capex = {i: 1E8 * capex_factor for i in INTERVALS}
-
-    # Define CCS CAPEX parameter
-    model.ccs_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize=ccs_capex)
-
     # CCS Transport and Storage Costs
-    transport_cost_per_kg_co2 = 0.05  # $ per kg of CO2 transported
-    storage_cost_per_kg_co2 = 0.03    # $ per kg of CO2 stored
+    transport_cost_per_kg_co2 = 0.05*1E3  # $ per kg of CO2 transported
+    storage_cost_per_kg_co2 = 0.03*1E3    # $ per kg of CO2 stored
 
     # -------------- Decision Variables --------------
 
@@ -452,6 +440,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         # Define time-indexed CAPEX parameters (for each interval i)
     model.h2_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize={i: h2_capex[i] for i in model.INTERVALS})
     model.eb_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize={i: eb_capex[i] for i in model.INTERVALS})
+    model.ccs_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize={i: ccs_capex[i] for i in model.INTERVALS})
 
     # Add CCS investment decision variables
     model.invest_ccs = Var(within=Binary)  # Decision to invest in CCS
@@ -475,7 +464,6 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Auxiliary variable for product
     model.total_fuel_co2_active_ccs = Var(model.MONTHS, within=NonNegativeReals)
 
-
     model.total_fuel_co2 = Expression(model.MONTHS, rule=lambda model, m: (
         model.fuel_blend_ng[m] * em_ng[m] * model.fuel_consumed[m] +
         model.fuel_blend_h2[m] * em_h2[m] * model.fuel_consumed[m] +
@@ -486,12 +474,12 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
  # -------------- Constraints --------------
     # Heat Balance
     def heat_balance_rule(model, m):
-        return model.heat_production[m] * (1-acti) >= (model.heat_over_production[m] + model.useful_heat[m])
+        return model.heat_production[m] >= (model.heat_over_production[m] + model.useful_heat[m])
     model.heat_balance = Constraint(model.MONTHS, rule=heat_balance_rule)
 
     # Heat Demand
     def heat_demand_balance(model, m):
-        return (model.heat_to_plant[m]) + model.heat_to_elec[m] >= (heat_demand[m] + model.ccs_energy_penalty[m])
+        return (model.heat_to_plant[m]) + model.heat_to_elec[m] >= (heat_demand[m])
     model.heat_demand_rule = Constraint(model.MONTHS, rule=heat_demand_balance)
 
     # Overproduction of Heat
@@ -633,7 +621,11 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     def total_emissions_per_interval_rule(model, i):
         start = i * intervals_time
         end = start + intervals_time
-        return model.total_emissions_per_interval[i] == sum(model.co2_emissions[m] for m in range(start, end))
+        # Sum both uncaptured fuel emissions and electricity-related emissions
+        return model.total_emissions_per_interval[i] == sum(
+            model.uncaptured_co2[m] + em_elec[m] * (model.purchased_electricity[m] + model.heat_to_elec[m])
+            for m in range(start, end)
+        )
     model.total_emissions_per_interval_constraint = Constraint(model.INTERVALS, rule=total_emissions_per_interval_rule)
 
     # Carbon Credits Needed Rule
@@ -683,7 +675,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Ensure CCS is only active after investment
     def active_ccs_rule(model, i):
         # CCS is active in interval `i` if investment has been made in any interval `j` <= `i`
-        return model.active_ccs[i] <= sum(model.invest_time_ccs[j] for j in model.INTERVALS if j <= i)
+        return model.active_ccs[i] == sum(model.invest_time_ccs[j] for j in model.INTERVALS if j <= i)
     model.active_ccs_constraint = Constraint(model.INTERVALS, rule=active_ccs_rule)
 
     # Limit CCS activation to investment status
@@ -691,7 +683,6 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         return model.active_ccs[i] <= model.invest_ccs
     model.ccs_activation_limit_constraint = Constraint(model.INTERVALS, rule=ccs_activation_limit_rule)
 
-    # Limit CCS investment to only one instance
     def single_investment_ccs_rule(model):
         return sum(model.invest_time_ccs[i] for i in model.INTERVALS) == model.invest_ccs
     model.single_investment_ccs_constraint = Constraint(rule=single_investment_ccs_rule)
@@ -724,33 +715,16 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Captured CO2 constraint
     def captured_co2_constraint(model, m):
-        return model.captured_co2[m] == 0.9 * model.total_fuel_co2_active_ccs[m]
+        interval = m // (len(model.MONTHS) // len(model.INTERVALS))
+        return model.captured_co2[m] <= adjusted_capture_efficiency_value * (model.total_fuel_co2_active_ccs[m] + res_emissions*model.active_ccs[interval])
     model.captured_co2_constraint = Constraint(model.MONTHS, rule=captured_co2_constraint)
 
     # Uncaptured CO2 constraint
     def uncaptured_co2_constraint(model, m):
-        return model.uncaptured_co2[m] == model.total_fuel_co2[m] - model.captured_co2[m]
+        interval = m // (len(model.MONTHS) // len(model.INTERVALS))
+        return model.uncaptured_co2[m] == model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
     model.uncaptured_co2_constraint = Constraint(model.MONTHS, rule=uncaptured_co2_constraint)
 
-    # CO2 Emissions Constraint with CCS
-    def co2_emissions_constraint_with_ccs(model, m):
-        total_co2_emissions = (model.uncaptured_co2[m] + em_elec[m] * (model.purchased_electricity[m] + model.heat_to_elec[m]))
-        return model.co2_emissions[m] == total_co2_emissions
-    model.co2_emissions_constraint_with_ccs = Constraint(model.MONTHS, rule=co2_emissions_constraint_with_ccs)
-    # Energy Penalty Due to CCS
-    def energy_penalty_ccs_rule(model, m):
-        interval = m // (len(model.MONTHS) // len(model.INTERVALS))
-        base_penalty = 0.2  # Base 10% energy penalty
-
-        # Penalty factor based on CO2 stream properties
-        penalty_factor = (
-            (1 + 0.0002 * (co2_stream_temp - 300)) *
-            (1 - 0.01 * (co2_stream_pressure - 10))
-        )
-        additional_energy_due_to_ccs = base_penalty * penalty_factor * model.fuel_consumed[m]
-
-        return model.ccs_energy_penalty[m] == additional_energy_due_to_ccs * model.active_ccs[interval]
-    model.ccs_energy_penalty_constraint = Constraint(model.MONTHS, rule=energy_penalty_ccs_rule)
 
     # Adjust Electricity Production Constraint to include CCS energy penalty
     def electricity_production_constraint(model, m):
@@ -766,7 +740,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         total_captured_co2 = sum(model.captured_co2[m] for m in range(start, end))
 
         # Total transport and storage cost
-        return model.transport_cost[i] == total_captured_co2 * (transport_cost_per_kg_co2 + storage_cost_per_kg_co2) * 1E6
+        return model.transport_cost[i] == total_captured_co2 * (transport_cost_per_kg_co2 + storage_cost_per_kg_co2)
     model.transport_storage_cost_constraint = Constraint(model.INTERVALS, rule=transport_and_storage_cost_rule)
 
     # -------------- Objective Function --------------
@@ -840,7 +814,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         # Total revenues
         total_revenues = elec_sold + heat_sold + carbon_sold
 
-        return total_costs - total_revenues
+        return total_costs - total_revenues 
     model.objective = Objective(rule=objective_rule, sense=minimize)
 
     # -------------- Solver --------------
