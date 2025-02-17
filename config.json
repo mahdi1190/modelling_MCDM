@@ -11,7 +11,7 @@
   "natural_gas_base_price": 0.03,
   "hydrogen_base_price_per_kg": 6.50,
   "biomass_base_price_per_tonne": 450.00,
-  "carbon_credit_cap_base": 15000,
+  "carbon_credit_cap_base": 27000,
 
   "hydrogen_energy_content": 33.33,
   "biomass_energy_content_per_tonne": 4500,
@@ -38,7 +38,7 @@
   "natural_gas_volatility": 0.10,
   "biomass_volatility": 0.05,
   "hydrogen_volatility": 0.08,
-  "carbon_credit_volatility": 0.1,
+  "carbon_credit_volatility": 0.2,
 
   "renewable_share": {
     "start_year": 2025,

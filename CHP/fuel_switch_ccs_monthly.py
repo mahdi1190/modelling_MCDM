@@ -37,22 +37,23 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
-electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
+electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv
 electricity_market_sold = electricity_market * 1E-3
 
 carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy() 
 
 NG_market = markets_monthly["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 1E-3
-H2_market = markets_monthly["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
+H2_market = markets_monthly["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv 
 BM_market = markets_monthly["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
 em_bm = markets_monthly["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_h2 = markets_monthly["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
-res_emissions = 15000
-CHP_capacity = 12000
+res_emissions = 450
+CHP_capacity = 10000
+
 
 energy_ratio = 0.25
 
@@ -318,6 +319,7 @@ time_limit = 300
 def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
     # Create model
     model = ConcreteModel()
+    ccs_energy_penalty_factor = 2  # mW thermal per tonne CO2 captured (adjust as needed)
 
     # -------------- Parameters --------------
     # Time periods (e.g., months in a year)
@@ -355,7 +357,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
     ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 14000
 
-    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]  # tonnes CO2
+    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]   # tonnes CO2
     M = 1E6
 
     # CO2 stream properties (can be varied)
@@ -364,7 +366,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     co2_concentration = 0.2  # CO2 concentration in flue gas
 
     # --- Compute adjusted_capture_efficiency outside constraints ---
-    base_capture_efficiency = 0.9  # Base capture efficiency
+    base_capture_efficiency = 0.8  # Base capture efficiency
     stream_factor = (
         (1 - 0.0001 * (co2_stream_temp - 300)) *
         (1 + 0.05 * (co2_stream_pressure - 10)) *
@@ -519,10 +521,11 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     def fuel_energy_rule(model, m):
         return model.fuel_energy[m] == model.fuel_blend_ng[m] + model.fuel_blend_h2[m] + model.fuel_blend_biomass[m]
     model.fuel_energy_rule_con = Constraint(model.MONTHS, rule=fuel_energy_rule)
-    # Fuel Consumption
+    
     def fuel_consumed_rule(model, m):
-        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * 0.7 == model.heat_production[m]
+        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) == model.heat_production[m] + model.ccs_energy_penalty[m]
     model.fuel_consumed_rule_con = Constraint(model.MONTHS, rule=fuel_consumed_rule)
+
 
     def electrical_efficiency_rule(model, m):
         efficiency_adjustment_times_CHP = (
@@ -725,6 +728,10 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         return model.uncaptured_co2[m] == model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
     model.uncaptured_co2_constraint = Constraint(model.MONTHS, rule=uncaptured_co2_constraint)
 
+        # Already declared earlier: model.ccs_energy_penalty = Var(model.MONTHS, within=NonNegativeReals)
+    def ccs_energy_penalty_rule(model, m):
+        return model.ccs_energy_penalty[m] == ccs_energy_penalty_factor * model.captured_co2[m]
+    model.ccs_energy_penalty_constraint = Constraint(model.MONTHS, rule=ccs_energy_penalty_rule)
 
     # Adjust Electricity Production Constraint to include CCS energy penalty
     def electricity_production_constraint(model, m):
