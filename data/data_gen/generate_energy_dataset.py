@@ -139,7 +139,6 @@ def adjust_correlations(df, config):
         (df['Renewable Share (%)'] - config['renewable_share']['start_share']) / \
         (config['renewable_share']['end_share'] - config['renewable_share']['start_share']) * \
         (config['hydrogen_correlation_max'] - config['hydrogen_correlation_base'])
-
     df['Hydrogen Correlation'] = df['Hydrogen Correlation'].clip(upper=config['hydrogen_correlation_max'])
 
     # Natural Gas and Electricity Correlation
@@ -147,18 +146,21 @@ def adjust_correlations(df, config):
         (df['Renewable Share (%)'] - config['renewable_share']['start_share']) / \
         (config['renewable_share']['end_share'] - config['renewable_share']['start_share']) * \
         (config['natural_gas_correlation_base'] - config['natural_gas_correlation_min'])
-
     df['Natural Gas Correlation'] = df['Natural Gas Correlation'].clip(lower=config['natural_gas_correlation_min'])
 
-    
-    # Biomass and Natural Gas Correlation
-    biomass_ng_correlation_base = config['biomass_natural_gas_correlation_base']
-    biomass_ng_correlation_change = config['biomass_natural_gas_correlation_change_per_year']
-    df['Biomass NG Correlation'] = biomass_ng_correlation_base + biomass_ng_correlation_change * df['Years Since Start']
-    df['Biomass NG Correlation'] = df['Biomass NG Correlation'].clip(upper=config['biomass_natural_gas_correlation_max'])
+    # --- Updated Biomass and Natural Gas Correlation ---
+    # Instead of a linear increase with time, we now let the correlation decay as renewables grow.
+    base_corr = config['biomass_natural_gas_correlation_base']
+    decay = config.get('biomass_natural_gas_correlation_decay', 0.5)
+    start_share = config['renewable_share']['start_share']
+    end_share = config['renewable_share']['end_share']
+    # Compute how far the renewable share has advanced (a value between 0 and 1)
+    renewable_factor = (df['Renewable Share (%)'] - start_share) / (end_share - start_share)
+    df['Biomass NG Correlation'] = base_corr * (1 - decay * renewable_factor)
+    df['Biomass NG Correlation'] = df['Biomass NG Correlation'].clip(lower=config.get('biomass_natural_gas_correlation_min', 0.05))
+    # Adjust biomass price to be a weighted average with natural gas price based on the computed correlation
     df['Biomass Price ($/kWh)'] = (df['Biomass Price ($/kWh)'] * (1 - df['Biomass NG Correlation'])) + \
                                    (df['Natural Gas Price ($/kWh)'] * df['Biomass NG Correlation'])
-    
     return df
 
 def implement_events(df, config):
@@ -470,33 +472,48 @@ def calculate_technology_capex(capex_df, tech_name, tech_config, config):
     capex_list = []
     cumulative_capacity = initial_capacity
     cost = base_cost
+    
     for year in years:
-        # Apply events
-        for event in events:
+        # Process events if any occur in this year
+        for event in events.copy():
             if 'start_year' in event and 'end_year' in event:
                 if event['start_year'] <= year <= event['end_year']:
-                    # Apply gradual change
-                    change_per_period = event['change_per_period']
+                    change_per_period = event.get('change_per_period', 0)
                     cost *= (1 + change_per_period)
             elif 'start_year' in event:
                 if year >= event['start_year']:
-                    # Apply immediate cost reduction
-                    cost *= (1 - event['cost_reduction'])
-                    # Remove the event after applying to prevent multiple applications
+                    cost *= (1 - event.get('cost_reduction', 0))
                     events.remove(event)
-                    break  # Assuming only one event per year per technology
-        # Calculate cost reduction due to learning
+                    break  # Only one event per year per technology
+
+        # Apply learning curve: cost decreases with increased cumulative capacity
         if cumulative_capacity > 0:
             capacity_factor = cumulative_capacity / initial_capacity
-            cost = base_cost * (capacity_factor) ** (np.log2(1 - learning_rate))
+            learning_adjustment = capacity_factor ** (np.log2(1 - learning_rate))
+            # Incorporate CAPEX inflation escalation
+            escalation_factor = (1 + config.get('capex_inflation_rate', 0.02)) ** (year - config['start_year'])
+            cost = base_cost * learning_adjustment * escalation_factor
 
         capex_list.append(cost)
 
-        # Update cumulative capacity
+        # Update cumulative capacity for next year
         cumulative_capacity *= (1 + annual_growth_rate)
 
     capex_df[capex_column_name] = capex_list
+
+    # Compute cumulative inflation from configuration data
+    inflation_df = pd.DataFrame(list(config['inflation_rates'].items()), columns=['Year', 'Inflation Rate'])
+    inflation_df['Year'] = inflation_df['Year'].astype(int)
+    inflation_df.sort_values('Year', inplace=True)
+    inflation_df['Cumulative Inflation'] = (1 + inflation_df['Inflation Rate']).cumprod()
+
+    # Merge cumulative inflation with capex_df
+    capex_df = capex_df.merge(inflation_df[['Year', 'Cumulative Inflation']], on='Year', how='left')
+    capex_df[capex_column_name] = capex_df[capex_column_name] / capex_df['Cumulative Inflation']
+    capex_df.drop(columns=['Cumulative Inflation'], inplace=True)
+
     return capex_df
+
 
 def save_capex_dataset(capex_df, config):
     capex_filename = config.get('capex_dataset_filename', 'capex_costs_over_time.csv')

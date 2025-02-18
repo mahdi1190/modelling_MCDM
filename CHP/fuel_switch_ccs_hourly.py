@@ -383,8 +383,7 @@ def update_graphs(n_intervals):
 
 total_hours = 8760
 time_limit = 300
-
-def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
+def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio, eb_allowed=0, h2_allowed=0, ccs_allowed=0, market_data=None, warm_start_values=None):
     """
     Hourly Pyomo model that:
       - Uses hourly data (indexed by model.HOURS).
@@ -398,6 +397,9 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
       CHP_capacity : CHP capacity (kW)
       energy_ratio : ratio linking heat production to electricity production
     """
+    active_eb = 1
+    active_h2 = 0
+    active_ccs = 0
     model = ConcreteModel()
 
     # -------------- Sets --------------
@@ -463,9 +465,6 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     # (They are not decision variables here.)
     model.active_h2_blending = Param(model.INTERVALS, within=Binary, mutable=True, default=0)
     model.active_eb = Param(model.INTERVALS, within=Binary, mutable=True, default=1)
-    active_eb = 1
-    active_h2 = 0
-    active_ccs = 0
     model.active_ccs = Param(model.INTERVALS, within=Binary, mutable=True, default=0)
 
     # ----------------- Decision Variables -----------------
@@ -474,10 +473,10 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.heat_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)*2))
     model.fuel_consumed = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)*3))
     model.heat_to_elec = Var(model.HOURS, within=NonNegativeReals)
-    model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(1, 1))
-    model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(1, 1))
+    model.electrical_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(1, 1), initialize=1)
+    model.thermal_efficiency = Var(model.HOURS, within=NonNegativeReals, bounds=(1, 1), initialize=1)
     
-    model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)*2))
+    model.heat_to_plant = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)*2), initialize=max(heat_demand))
     model.elec_to_plant = Var(model.HOURS, within=NonNegativeReals)
     model.useful_heat = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)*2))
     model.useful_elec = Var(model.HOURS, within=NonNegativeReals)
@@ -488,24 +487,24 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     model.heat_over_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
     model.electricity_over_production = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
-    model.ramp_rate = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max_ramp_rate))
+    model.ramp_rate = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max_ramp_rate),initialize=max_ramp_rate)
 
     model.refrigeration_produced = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.heat_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.elec_used_for_cooling = Var(model.HOURS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
 
-    model.co2_emissions = Var(model.HOURS, within=NonNegativeReals)
-    model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
-    model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
-    model.exceeds_cap = Var(model.INTERVALS, within=Binary)
+    model.co2_emissions = Var(model.HOURS, within=NonNegativeReals, initialize=0)
+    model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)), initialize=0)
+    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.exceeds_cap = Var(model.INTERVALS, within=Binary, initialize=0)
     model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
     model.emissions_difference = Var(model.INTERVALS, domain=Reals,
-                                     bounds=(-max(max_co2_emissions*10), max(max_co2_emissions*10)))
+                                     bounds=(-max(max_co2_emissions*10), max(max_co2_emissions*10)), initialize=0)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.below_cap = Var(model.INTERVALS, within=Binary)
+    model.below_cap = Var(model.INTERVALS, within=Binary, initialize=1)
 
     model.captured_co2 = Var(model.HOURS, within=NonNegativeReals)
     model.uncaptured_co2 = Var(model.HOURS, within=NonNegativeReals)
@@ -515,7 +514,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     # Auxiliary variable for linking fuel consumption and CO₂ with active CCS
     fuel_consumed_ub = model.fuel_consumed[0].ub
     total_fuel_co2_ub = fuel_consumed_ub
-    model.total_fuel_co2_active_ccs = Var(model.HOURS, within=NonNegativeReals)
+    model.total_fuel_co2_active_ccs = Var(model.HOURS, within=NonNegativeReals, initialize=0)
 
     # Fuel blending decision variables (defined on INTERVALS)
     model.fuel_blend_ng = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, 1))

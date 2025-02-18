@@ -8,9 +8,13 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
 # Import the solver options
 from solver_options import get_solver
+import datetime
 import numpy as np
 import locale
 import gc
+
+BASE_NAME = "base_case"
+
 gc.disable()  # Disable garbage collection temporarily
 
 locale.setlocale(locale.LC_ALL, '')  # Setting locale once here
@@ -313,6 +317,85 @@ def update_graphs(n_intervals):
     else:
         raise dash.exceptions.PreventUpdate
 
+
+def save_all_model_variables(model, total_months, no_intervals, results_folder, timestamp, simulation_name):
+    """
+    Save model variables into one CSV file.
+    Rows correspond to months [0, total_months-1].
+    For variables indexed by MONTHS, the value is taken directly.
+    For variables indexed by INTERVALS, we map each month to an interval using:
+        interval = m // (total_months // no_intervals)
+    Scalar variables are replicated for each month.
+    Variables that are indexed over other sets are skipped.
+    """
+    # Create a list of months (time index)
+    months = list(range(total_months))
+    
+    # Define the mapping function from month to interval.
+    # (Assumes total_months is exactly divisible by no_intervals.)
+    def month_to_interval(m):
+        return m // (total_months // no_intervals)
+    
+    # Prepare a dictionary to build the DataFrame.
+    data = {'Time': months}
+    
+    # Try to access your model sets, if defined.
+    try:
+        model_months = set(model.MONTHS)
+    except AttributeError:
+        model_months = None
+
+    try:
+        model_intervals = set(model.INTERVALS)
+    except AttributeError:
+        model_intervals = None
+
+    # Iterate over all Var components in the model.
+    for var_component in model.component_objects(Var, active=True):
+        var_name = var_component.name
+        col = []  # values for each month
+        
+        # If the variable is scalar, replicate its value.
+        if not var_component.is_indexed():
+            scalar_val = value(var_component)
+            col = [scalar_val] * total_months
+        else:
+            # Get the variable's keys and turn them into a set.
+            keys = list(var_component.keys())
+            keys_set = set(keys)
+            
+            # If the keys match the MONTHS set, extract the value per month.
+            if model_months is not None and keys_set == model_months:
+                for m in months:
+                    col.append(value(var_component[m]))
+            # If the keys match the INTERVALS set, map each month to its interval.
+            elif model_intervals is not None and keys_set == model_intervals:
+                for m in months:
+                    interval = month_to_interval(m)
+                    col.append(value(var_component[interval]))
+            else:
+                # Variable is indexed by something else (e.g., multiple indices) – skip it.
+                print(f"Skipping variable '{var_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
+                continue
+        data[var_name] = col
+
+    # Create the DataFrame and save to CSV.
+    df = pd.DataFrame(data)
+    filepath = os.path.join(results_folder, f"{BASE_NAME}_monthly.csv")
+    df.to_csv(filepath, index=False)
+    print(f"Saved mapped model variables to {filepath}")
+
+
+def create_results_folder():
+    # Change here: use BASE_NAME only once
+    base_dir = os.path.join(os.path.dirname(__file__), "results", BASE_NAME)
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
+        print("Created results folder:", base_dir)
+    else:
+        print("Results folder already exists:", base_dir)
+    return base_dir
+
 total_months = 360
 time_limit = 300
 # Create a simple model
@@ -388,8 +471,8 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     model.heat_to_elec = Var(model.MONTHS, within=NonNegativeReals)
     
-    model.electrical_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1))
-    model.thermal_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1))
+    model.electrical_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1),  initialize=1)
+    model.thermal_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1), initialize=1)
 
     # Fuel variables (change from INTERVALS to MONTHS)
     model.fuel_blend_ng = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, 1))
@@ -420,24 +503,24 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Overproduction and Ramp Rate
     model.heat_over_production = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
     model.electricity_over_production = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
-    model.ramp_rate = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max_ramp_rate))
+    model.ramp_rate = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max_ramp_rate), initialize=max_ramp_rate)
 
     # Refrigeration
     model.refrigeration_produced = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.heat_used_for_cooling = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.elec_used_for_cooling = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     # Variables
-    model.co2_emissions = Var(model.MONTHS, within=NonNegativeReals)
+    model.co2_emissions = Var(model.MONTHS, within=NonNegativeReals, initialize=0)
     model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
     model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
-    model.exceeds_cap = Var(model.INTERVALS, within=Binary)
-    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max(max_co2_emissions*10),max(max_co2_emissions*10)))
+    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)), initialize=0)
+    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.exceeds_cap = Var(model.INTERVALS, within=Binary,  initialize=0)
+    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)),  initialize=0)
+    model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max(max_co2_emissions*10),max(max_co2_emissions*10)),  initialize=0)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals,bounds=(0, max(max_co2_emissions*10)))
-    model.below_cap = Var(model.INTERVALS, within=Binary)
+    model.below_cap = Var(model.INTERVALS, within=Binary,  initialize=1)
 
         # Define time-indexed CAPEX parameters (for each interval i)
     model.h2_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize={i: h2_capex[i] for i in model.INTERVALS})
@@ -919,6 +1002,20 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Save to CSV
     investment_info.to_csv('investment_info.csv', index=False)
+
+    # ---------------------------
+    # Save every model variable mapped by time (month)
+    
+    # Create a timestamp string (e.g., "20250218_153045")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Define your results folder (e.g., "results/monthly_results" relative to current_dir)
+    results_folder = os.path.join(current_dir, 'results', BASE_NAME)
+    os.makedirs(results_folder, exist_ok=True)
+    
+    # Save the model variables to one CSV file.
+    save_all_model_variables(model, total_months, 30, results_folder, timestamp, "simulation_name")
+    # ---------------------------
+
     return model
 
 gc.enable()  # Re-enable garbage collection after the critical section
