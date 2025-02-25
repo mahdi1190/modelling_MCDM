@@ -330,7 +330,39 @@
       ]
     }
   },
-
   "epoxy_resin_carbon_cap_fraction": 0.9,
-  "capex_inflation_rate": 0.02
+  "capex_inflation_rate": 0.02,
+
+
+    "selling_price_per_tonne": 4000,
+    "resin_mu": 0,
+    "resin_sigma": 0,
+    "resin_events": [
+      {
+        "name": "High Demand",
+        "start_year": 2030,
+        "end_year": 2032,
+        "price_multiplier": 1.10
+      },
+      {
+        "name": "Market Correction",
+        "start_year": 2040,
+        "end_year": 2040,
+        "price_multiplier": 0.95
+      }
+    ],
+    "bpa_base_price": 1500,
+    "ech_base_price": 2500,
+    "bpa_correlation_with_ng": 0.8,
+    "ech_correlation_with_ng": 0.8,
+    "fixed_costs": {
+      "labour_cost_per_year": 20000000,
+      "overhead_cost_per_year": 10000000,
+      "maintenance_cost_per_year": 5000000,
+      "depreciation_per_year": 5000000,
+      "environmental_compliance_cost_per_year": 5000000
+    },
+    "production_tonnage": 100000,
+    "fixed_cost_growth": 0.02
 }
+

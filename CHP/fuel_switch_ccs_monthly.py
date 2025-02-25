@@ -28,7 +28,6 @@ current_dir = os.path.dirname(__file__)
 # Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
 demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands_monthly_30.csv'))
 markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.csv'))
-markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.csv'))  # Corrected path
 
 capex_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'capex_costs_over_time.csv'))  # Corrected path
 unit_conv = 1E3
@@ -57,7 +56,6 @@ em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
 res_emissions = 450
 CHP_capacity = 10000
-
 
 energy_ratio = 0.25
 
@@ -320,19 +318,18 @@ def update_graphs(n_intervals):
 
 def save_all_model_variables(model, total_months, no_intervals, results_folder, timestamp, simulation_name):
     """
-    Save model variables into one CSV file.
+    Save model variables and expressions into one CSV file.
     Rows correspond to months [0, total_months-1].
-    For variables indexed by MONTHS, the value is taken directly.
-    For variables indexed by INTERVALS, we map each month to an interval using:
+    For components indexed by MONTHS, the value is taken directly.
+    For components indexed by INTERVALS, we map each month to an interval using:
         interval = m // (total_months // no_intervals)
-    Scalar variables are replicated for each month.
-    Variables that are indexed over other sets are skipped.
+    Scalar components are replicated for each month.
+    Components indexed over other sets are skipped.
     """
     # Create a list of months (time index)
     months = list(range(total_months))
     
-    # Define the mapping function from month to interval.
-    # (Assumes total_months is exactly divisible by no_intervals.)
+    # Mapping function from month to interval.
     def month_to_interval(m):
         return m // (total_months // no_intervals)
     
@@ -350,40 +347,66 @@ def save_all_model_variables(model, total_months, no_intervals, results_folder, 
     except AttributeError:
         model_intervals = None
 
-    # Iterate over all Var components in the model.
-    for var_component in model.component_objects(Var, active=True):
-        var_name = var_component.name
+    # Process all Var components.
+    for comp in model.component_objects(Var, active=True):
+        comp_name = comp.name
         col = []  # values for each month
-        
-        # If the variable is scalar, replicate its value.
-        if not var_component.is_indexed():
-            scalar_val = value(var_component)
-            col = [scalar_val] * total_months
-        else:
-            # Get the variable's keys and turn them into a set.
-            keys = list(var_component.keys())
-            keys_set = set(keys)
-            
-            # If the keys match the MONTHS set, extract the value per month.
-            if model_months is not None and keys_set == model_months:
-                for m in months:
-                    col.append(value(var_component[m]))
-            # If the keys match the INTERVALS set, map each month to its interval.
-            elif model_intervals is not None and keys_set == model_intervals:
-                for m in months:
-                    interval = month_to_interval(m)
-                    col.append(value(var_component[interval]))
+        try:
+            if not comp.is_indexed():
+                # Scalar variable: replicate its value.
+                scalar_val = value(comp)
+                col = [scalar_val] * total_months
             else:
-                # Variable is indexed by something else (e.g., multiple indices) – skip it.
-                print(f"Skipping variable '{var_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
-                continue
-        data[var_name] = col
+                keys = list(comp.keys())
+                keys_set = set(keys)
+                if model_months is not None and keys_set == model_months:
+                    for m in months:
+                        col.append(value(comp[m]))
+                elif model_intervals is not None and keys_set == model_intervals:
+                    for m in months:
+                        interval = month_to_interval(m)
+                        col.append(value(comp[interval]))
+                else:
+                    print(f"Skipping variable '{comp_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
+                    continue
+        except Exception as e:
+            print(f"Error processing variable '{comp_name}': {e}")
+            continue
+        data[comp_name] = col
+
+    # Process all Expression components.
+    for comp in model.component_objects(Expression, active=True):
+        comp_name = comp.name
+        col = []  # values for each month
+        try:
+            if not comp.is_indexed():
+                # Scalar expression: replicate its value.
+                scalar_val = value(comp)
+                col = [scalar_val] * total_months
+            else:
+                keys = list(comp.keys())
+                keys_set = set(keys)
+                if model_months is not None and keys_set == model_months:
+                    for m in months:
+                        col.append(value(comp[m]))
+                elif model_intervals is not None and keys_set == model_intervals:
+                    for m in months:
+                        interval = month_to_interval(m)
+                        col.append(value(comp[interval]))
+                else:
+                    print(f"Skipping expression '{comp_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
+                    continue
+        except Exception as e:
+            print(f"Error processing expression '{comp_name}': {e}")
+            continue
+        data[comp_name] = col
 
     # Create the DataFrame and save to CSV.
     df = pd.DataFrame(data)
-    filepath = os.path.join(results_folder, f"{BASE_NAME}_monthly.csv")
+    filepath = os.path.join(results_folder, f"{simulation_name}_monthly.csv")
     df.to_csv(filepath, index=False)
-    print(f"Saved mapped model variables to {filepath}")
+    print(f"Saved mapped model variables and expressions to {filepath}")
+
 
 
 def create_results_folder():
@@ -834,78 +857,95 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.transport_storage_cost_constraint = Constraint(model.INTERVALS, rule=transport_and_storage_cost_rule)
 
     # -------------- Objective Function --------------
+    # ------------------ Cost Expressions ------------------
+    # Electricity cost: cost of purchased electricity and heat conversion.
+    model.elec_cost = Expression(expr=sum(
+        (model.purchased_electricity[m] + model.heat_to_elec[m]) * electricity_market[m]
+        for m in model.MONTHS))
 
-    # Modify the objective function to include CCS-related costs
-    def objective_rule(model):
-        # Existing cost components
-        elec_cost = sum(
-            (model.purchased_electricity[m] + model.heat_to_elec[m]) * electricity_market[m]
-            for m in model.MONTHS
-        )
-        elec_sold = sum(
-            model.electricity_over_production[m] * electricity_market_sold[m]
-            for m in model.MONTHS
-        )
-        heat_sold = sum(
-            heat_market_sold[m] * model.heat_over_production[m]
-            for m in model.MONTHS
-        )
+    # Natural Gas fuel cost.
+    model.fuel_cost_NG = Expression(expr=sum(
+        model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]
+        for m in model.MONTHS))
 
-        fuel_cost_NG = sum(
-            model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
-        fuel_cost_H2 = sum(
-            model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
-        fuel_cost_BM = sum(
-            model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
+    # Hydrogen fuel cost.
+    model.fuel_cost_H2 = Expression(expr=sum(
+        model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m]
+        for m in model.MONTHS))
 
-        carbon_cost = sum(
-            model.carbon_credits[i] * carbon_market[i]
-            for i in model.INTERVALS
-        )
-        carbon_sold = sum(
-            model.credits_sold[i] * carbon_market[i]
-            for i in model.INTERVALS
-        )
+    # Biomass fuel cost.
+    model.fuel_cost_BM = Expression(expr=sum(
+        model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]
+        for m in model.MONTHS))
 
-        # CCS-related costs
-        transport_storage_cost = sum(
-            model.transport_cost[i]
-            for i in model.INTERVALS
-        )
-        ccs_investment_cost = sum(
-            model.invest_time_ccs[i] * model.ccs_capex[i]
-            for i in model.INTERVALS
-        )
+    # Carbon cost from credits purchased (indexed over INTERVALS).
+    model.carbon_cost = Expression(expr=sum(
+        model.carbon_credits[i] * carbon_market[i]
+        for i in model.INTERVALS))
 
-        # Time-dependent CAPEX for hydrogen and electrification
-        h2_investment_cost = sum(
-            model.invest_time[i] * model.h2_capex[i]
-            for i in model.INTERVALS
-        )
-        eb_investment_cost = sum(
-            model.invest_time_eb[i] * model.eb_capex[i]
-            for i in model.INTERVALS
-        )
+    # ------------------ Investment and CCS-Related Costs ------------------
+    # Transport and storage cost for captured CO₂ (indexed over INTERVALS).
+    model.transport_storage_cost = Expression(expr=sum(
+        model.transport_cost[i]
+        for i in model.INTERVALS))
 
-        # Total costs
-        total_costs = (
-            fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM +
-            elec_cost + carbon_cost +
-            h2_investment_cost + eb_investment_cost + ccs_investment_cost +
-            transport_storage_cost
-        )
+    # CCS investment cost.
+    model.ccs_investment_cost = Expression(expr=sum(
+        model.invest_time_ccs[i] * model.ccs_capex[i]
+        for i in model.INTERVALS))
 
-        # Total revenues
-        total_revenues = elec_sold + heat_sold + carbon_sold
+    # Investment cost for hydrogen.
+    model.h2_investment_cost = Expression(expr=sum(
+        model.invest_time[i] * model.h2_capex[i]
+        for i in model.INTERVALS))
 
-        return total_costs - total_revenues 
-    model.objective = Objective(rule=objective_rule, sense=minimize)
+    # Investment cost for electrification.
+    model.eb_investment_cost = Expression(expr=sum(
+        model.invest_time_eb[i] * model.eb_capex[i]
+        for i in model.INTERVALS))
+
+    # ------------------ Revenue Expressions ------------------
+    # Revenue from selling excess electricity.
+    model.elec_sold_expr = Expression(expr=sum(
+        model.electricity_over_production[m] * electricity_market_sold[m]
+        for m in model.MONTHS))
+
+    # Revenue from selling excess heat.
+    model.heat_sold_expr = Expression(expr=sum(
+        heat_market_sold[m] * model.heat_over_production[m]
+        for m in model.MONTHS))
+
+    # Revenue from selling carbon credits (indexed over INTERVALS).
+    model.carbon_sold_expr = Expression(expr=sum(
+        model.credits_sold[i] * carbon_market[i]
+        for i in model.INTERVALS))
+
+    # ------------------ Aggregated Expressions ------------------
+    # Total costs: Sum of all cost and investment components.
+    model.total_costs = Expression(expr=
+        model.fuel_cost_NG +
+        model.fuel_cost_H2 +
+        model.fuel_cost_BM +
+        model.elec_cost +
+        model.carbon_cost +
+        model.h2_investment_cost +
+        model.eb_investment_cost +
+        model.ccs_investment_cost +
+        model.transport_storage_cost)
+
+    # Total revenues: Sum of all revenue components.
+    model.total_revenues = Expression(expr=
+        model.elec_sold_expr +
+        model.heat_sold_expr +
+        model.carbon_sold_expr)
+
+    # ------------------ Objective Expression ------------------
+    # Objective: minimize total costs minus total revenues.
+    model.objective_expr = Expression(expr=model.total_costs - model.total_revenues)
+
+    # Set the model objective.
+    model.objective = Objective(expr=model.objective_expr, sense=minimize)
+
 
     # -------------- Solver --------------
 
@@ -1013,7 +1053,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     os.makedirs(results_folder, exist_ok=True)
     
     # Save the model variables to one CSV file.
-    save_all_model_variables(model, total_months, 30, results_folder, timestamp, "simulation_name")
+    save_all_model_variables(model, total_months, 30, results_folder, timestamp, BASE_NAME)
     # ---------------------------
 
     return model

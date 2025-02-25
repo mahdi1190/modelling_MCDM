@@ -30,13 +30,10 @@ if not os.path.exists(results_dir):
     os.makedirs(results_dir)
 demands_path = os.path.join(data_dir, 'demands_hourly_year.csv')
 markets_path = os.path.join(data_dir, 'markets.csv')
-investment_log_path = os.path.abspath(os.path.join(current_dir, '..', 'investment_log', "eb_investment.csv"))
-results_filepath = os.path.join(results_dir, 'model_results.csv')
 
 # Read input CSV files (here we read only the first 8761 rows as in your example)
 demands = pd.read_csv(demands_path, nrows=8761)
 markets = pd.read_csv(markets_path, nrows=8761)
-investment_data = pd.read_csv(investment_log_path)
 
 # Set up demand, penalty/reward and market parameters (adjust as needed)
 shortfall_penalty = demands["penalty"].to_numpy()
@@ -47,7 +44,7 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
-resin_per_tonne = 3500
+resin_per_tonne = 1000
 
 unit_conv = 1E3
 electricity_market = markets["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
@@ -383,7 +380,9 @@ def update_graphs(n_intervals):
 
 total_hours = 8760
 time_limit = 300
-def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio, eb_allowed=0, h2_allowed=0, ccs_allowed=0, market_data=None, warm_start_values=None):
+def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0.25,
+               eb_allowed=0, h2_allowed=0, ccs_allowed=0, demand_data=None, market_data=None,
+               warm_start_values=None):    
     """
     Hourly Pyomo model that:
       - Uses hourly data (indexed by model.HOURS).
@@ -397,9 +396,65 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
       CHP_capacity : CHP capacity (kW)
       energy_ratio : ratio linking heat production to electricity production
     """
-    active_eb = 1
-    active_h2 = 0
-    active_ccs = 0
+    current_dir = os.path.dirname(__file__)
+    data_dir = os.path.abspath(os.path.join(current_dir, '..', 'data'))
+    results_dir = os.path.abspath(os.path.join(current_dir, '..', 'results'))
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    
+    # -------------------- Demand Data --------------------
+    if demand_data is None:
+        demands_path = os.path.join(data_dir, 'demands_hourly_year.csv')
+        # For backwards compatibility, read first year
+        demands = pd.read_csv(demands_path, nrows=8761)
+        shortfall_penalty = demands["penalty"].to_numpy()
+        reward = demands["revenue"].to_numpy()
+        request = demands["request"].to_numpy()
+        electricity_demand = demands["elec"].to_numpy()
+        heat_demand = demands["heat"].to_numpy()
+        refrigeration_demand = demands["cool"].to_numpy()
+    else:
+        shortfall_penalty = demand_data["penalty"]
+        reward = demand_data["revenue"]
+        request = demand_data["request"]
+        electricity_demand = demand_data["elec"]
+        heat_demand = demand_data["heat"]
+        refrigeration_demand = demand_data["cool"]
+    
+    # -------------------- Market Data --------------------
+    if market_data is None:
+        markets_path = os.path.join(data_dir, 'markets.csv')
+        markets = pd.read_csv(markets_path, nrows=8761)
+        unit_conv = 1E3
+        electricity_market = markets["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
+        electricity_market_sold = electricity_market * 1E-3
+        carbon_market = markets["Carbon Credit Price ($/tonne CO2)"].to_numpy()
+        NG_market = markets["Natural Gas Price ($/kWh)"].to_numpy() * unit_conv
+        heat_market_sold = NG_market * 1E-3
+        H2_market = markets["Hydrogen Price ($/kWh)"].to_numpy() * unit_conv
+        BM_market = markets["Biomass Price ($/kWh)"].to_numpy() * unit_conv
+        em_bm = markets["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
+        em_h2 = markets["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
+        em_ng = markets["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
+        em_elec = markets["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
+        max_co2_emissions = markets["Effective Carbon Credit Cap"].to_numpy() / 12
+    else:
+        electricity_market = market_data["electricity_market"]
+        electricity_market_sold = market_data["electricity_market_sold"]
+        carbon_market = market_data["carbon_market"]
+        NG_market = market_data["NG_market"]
+        heat_market_sold = market_data["heat_market_sold"]
+        H2_market = market_data["H2_market"]
+        BM_market = market_data["BM_market"]
+        em_bm = market_data["em_bm"]
+        em_h2 = market_data["em_h2"]
+        em_ng = market_data["em_ng"]
+        em_elec = market_data["em_elec"]
+        max_co2_emissions = market_data["max_co2_emissions"]
+
+    active_eb = eb_allowed
+    active_h2 = h2_allowed
+    active_ccs = ccs_allowed
     model = ConcreteModel()
 
     # -------------- Sets --------------
@@ -421,23 +476,10 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
 
     COP_h = 2
     COP_e = 1
-
-    capital_cost_per_kw = 1000    # $/kW
-    fuel_energy = 1              # (since fuel blends sum to 1)
+    
     max_ramp_rate = 1        # kW per timestep
 
-    TEMP = 700
-    PRES = 50
 
-    # Efficiency coefficients (placeholders)
-    ng_coeffs = {"elec": [0.25, 0.025, 0.001], "thermal": [0.2, 0.05, 0.001]}
-    h2_coeffs = {"elec": [0.18, 0.02, 0.0015], "thermal": [0.15, 0.04, 0.0012]}
-
-    # Example capex arrays (adjust as needed)
-    h2_capex_array = np.full(no_intervals, 1E8 * CHP_capacity)
-    eb_capex_array = np.full(no_intervals, 1E8 * CHP_capacity)
-
-    # For CCS capex and CO₂ stream properties
     co2_stream_temp = 400
     co2_stream_pressure = 10
     co2_concentration = 0.2
@@ -725,36 +767,94 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
     model.grid_call_constraint = Constraint(model.HOURS, rule=grid_call_constraint)
 
 
-    # ----------------- Objective Function -----------------
-    def objective_rule(model):
-        # Hourly operational costs and revenues
-        elec_cost = sum((model.purchased_electricity[h] + model.heat_to_elec[h]) * electricity_market[h]
-                        for h in model.HOURS)
-        elec_sold = sum(model.electricity_over_production[h] * electricity_market_sold[h] for h in model.HOURS)
-        heat_sold = sum(heat_market_sold[h] * model.heat_over_production[h] for h in model.HOURS)
-        
-        fuel_cost_NG = sum(model.fuel_blend_ng[h // intervals_time] * NG_market[h] * model.fuel_consumed[h]
-                           for h in model.HOURS)
-        fuel_cost_H2 = sum(model.fuel_blend_h2[h // intervals_time] * H2_market[h] * model.fuel_consumed[h]
-                           for h in model.HOURS)
-        fuel_cost_BM = sum(model.fuel_blend_biomass[h // intervals_time] * BM_market[h] * model.fuel_consumed[h]
-                           for h in model.HOURS)
-        
-        carbon_cost = sum(model.carbon_credits[i] * carbon_market[i] for i in model.INTERVALS)
-        carbon_sold = sum(model.credits_sold[i] * carbon_market[i] for i in model.INTERVALS)
-        
-        production_revenue = sum(model.production_output[h] for h in model.HOURS) * resin_per_tonne
-        ancillary_revenue = sum(reward[h] * model.elec_reduction[h] for h in model.HOURS) * 1E6
-        shortfall_penalty_total = sum(shortfall_penalty[h] * model.grid_reduction_shortfall[h] for h in model.HOURS)
 
-        transport_storage_cost = sum(model.transport_cost[i] for i in model.INTERVALS)
-    
-        total_costs = (fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM +
-                       elec_cost + carbon_cost +
-                       transport_storage_cost + shortfall_penalty_total)
-        total_revenues = elec_sold + heat_sold + carbon_sold + ancillary_revenue + production_revenue
-        return total_costs - total_revenues
-    model.objective = Objective(rule=objective_rule, sense=minimize)
+    # ------------------ Cost Expressions ------------------
+    # Electricity cost: cost of purchased electricity and converting heat to electricity.
+    model.elec_cost = Expression(expr=sum(
+        (model.purchased_electricity[h] + model.heat_to_elec[h]) * electricity_market[h]
+        for h in model.HOURS))
+
+    # Natural Gas fuel cost.
+    model.fuel_cost_NG = Expression(expr=sum(
+        model.fuel_blend_ng[h // intervals_time] * NG_market[h] * model.fuel_consumed[h]
+        for h in model.HOURS))
+
+    # Hydrogen fuel cost.
+    model.fuel_cost_H2 = Expression(expr=sum(
+        model.fuel_blend_h2[h // intervals_time] * H2_market[h] * model.fuel_consumed[h]
+        for h in model.HOURS))
+
+    # Biomass fuel cost.
+    model.fuel_cost_BM = Expression(expr=sum(
+        model.fuel_blend_biomass[h // intervals_time] * BM_market[h] * model.fuel_consumed[h]
+        for h in model.HOURS))
+
+    # Carbon cost from purchasing credits (indexed over intervals).
+    model.carbon_cost = Expression(expr=sum(
+        model.carbon_credits[i] * carbon_market[i]
+        for i in model.INTERVALS))
+
+    # Transport and storage cost for captured CO₂ (indexed over intervals).
+    model.transport_storage_cost = Expression(expr=sum(
+        model.transport_cost[i] for i in model.INTERVALS))
+
+    # Shortfall penalty cost from grid reduction.
+    model.shortfall_penalty_total = Expression(expr=sum(
+        shortfall_penalty[h] * model.grid_reduction_shortfall[h]
+        for h in model.HOURS))
+
+
+    # ------------------ Revenue Expressions ------------------
+    # Revenue from selling excess electricity.
+    model.elec_sold_expr = Expression(expr=sum(
+        model.electricity_over_production[h] * electricity_market_sold[h]
+        for h in model.HOURS))
+
+    # Revenue from selling excess heat.
+    model.heat_sold_expr = Expression(expr=sum(
+        heat_market_sold[h] * model.heat_over_production[h]
+        for h in model.HOURS))
+
+    # Revenue from selling carbon credits.
+    model.carbon_sold_expr = Expression(expr=sum(
+        model.credits_sold[i] * carbon_market[i]
+        for i in model.INTERVALS))
+
+    # Production revenue (e.g., based on production output and a price per tonne).
+    model.production_revenue = Expression(expr=sum(
+        model.production_output[h] for h in model.HOURS) * resin_per_tonne)
+
+    # Ancillary revenue (e.g., from demand response or other ancillary services).
+    model.ancillary_revenue = Expression(expr=sum(
+        reward[h] * model.elec_reduction[h]
+        for h in model.HOURS) * 1E3)
+
+
+    # ------------------ Aggregated Total Expressions ------------------
+    # Total costs: Sum of all cost components.
+    model.total_costs = Expression(expr=
+        model.elec_cost +
+        model.fuel_cost_NG +
+        model.fuel_cost_H2 +
+        model.fuel_cost_BM +
+        model.carbon_cost +
+        model.transport_storage_cost +
+        model.shortfall_penalty_total)
+
+    # Total revenues: Sum of all revenue components.
+    model.total_revenues = Expression(expr=
+        model.elec_sold_expr +
+        model.heat_sold_expr +
+        model.carbon_sold_expr +
+        model.ancillary_revenue +
+        model.production_revenue)
+
+    # ------------------ Objective Expression ------------------
+    # Objective: Minimize the difference between total costs and total revenues.
+    model.objective_expr = Expression(expr=model.total_costs - model.total_revenues)
+
+    # Set the model objective using the expression.
+    model.objective = Objective(expr=model.objective_expr, sense=minimize)
 
     # ----------------- Solve the Model -----------------
     solver = get_solver(time_limit)
@@ -772,7 +872,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         'Fuel Blend H2': [fuel_blend_h2_results[i] for i in model.INTERVALS],
         'Fuel Blend Biomass': [fuel_blend_biomass_results[i] for i in model.INTERVALS]
     })
-    results_df.to_csv('hourly_fuel_blend_results.csv', index=False)
+    #results_df.to_csv('hourly_fuel_blend_results.csv', index=False)
 
     # Save the externally set investment (technology activation) information
     investment_info = pd.DataFrame({
@@ -781,7 +881,7 @@ def pyomomodel(total_hours = total_hours, time_limit = time_limit, CHP_capacity=
         'Active EB': [value(model.active_eb[i]) for i in model.INTERVALS],
         'Active CCS': [value(model.active_ccs[i]) for i in model.INTERVALS]
     })
-    investment_info.to_csv('investment_info.csv', index=False)
+    #investment_info.to_csv('investment_info.csv', index=False)
 
     return model
 
