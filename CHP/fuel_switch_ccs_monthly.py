@@ -311,7 +311,7 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"Credit Cost: NaN",  
+           f"Credit Cost: {locale.currency(sum(credits[i] * carbon_market[i] for i in model.INTERVALS), grouping=True)}",  
     else:
         raise dash.exceptions.PreventUpdate
 

@@ -353,6 +353,7 @@
     ],
     "bpa_base_price": 1500,
     "ech_base_price": 2500,
+    "real_discount_rate": 0.03,
     "bpa_correlation_with_ng": 0.8,
     "ech_correlation_with_ng": 0.8,
     "fixed_costs": {
