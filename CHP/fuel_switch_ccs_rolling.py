@@ -49,7 +49,7 @@ def get_yearly_market_data(year, markets_df, hours_per_year=8760):
     df_year = markets_df.iloc[start:end]
     if df_year.empty:
         raise ValueError(f"No market data found for year {year}.")
-    unit_conv = 1E3  # Conversion factor used in your model
+    unit_conv = 1E3  # Conversion factor used in your model 
     return {
         "electricity_market": df_year["Electricity Price ($/kWh)"].to_numpy() * unit_conv,
         "electricity_market_sold": df_year["Electricity Price ($/kWh)"].to_numpy(),
@@ -62,7 +62,9 @@ def get_yearly_market_data(year, markets_df, hours_per_year=8760):
         "em_h2": df_year["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy(),
         "em_ng": df_year["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy(),
         "em_elec": df_year["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy(),
-        "max_co2_emissions": df_year["Effective Carbon Credit Cap"].to_numpy() / 12
+        "max_co2_emissions": df_year["Effective Carbon Credit Cap"].to_numpy() / 12,
+        "margin": df_year["Input Margin ($/tonne) PV"].to_numpy(),
+        "labour": df_year["Fixed Cost ($/tonne)"].to_numpy(),
     }
 
 # --------------------------

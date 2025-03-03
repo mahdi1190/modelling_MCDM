@@ -31,7 +31,7 @@ if not os.path.exists(results_dir):
 demands_path = os.path.join(data_dir, 'demands_hourly_year.csv')
 markets_path = os.path.join(data_dir, 'markets.csv')
 
-# Read input CSV files (here we read only the first 8761 rows as in your example)
+# Read input CSV files (here we read only the first 8761 rows as in your example) 
 demands = pd.read_csv(demands_path, nrows=8761)
 markets = pd.read_csv(markets_path, nrows=8761)
 
@@ -65,6 +65,8 @@ max_co2_emissions = markets["Effective Carbon Credit Cap"] / 12 # tonnes CO2
 CHP_capacity = 15
 energy_ratio = 0.25
 
+margin = markets["Input Margin ($/tonne) PV"]
+labour = markets["Fixed Cost ($/tonne)"]
 app = dash.Dash(__name__)
 
 # ------------------------------
@@ -438,6 +440,8 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         em_ng = markets["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
         em_elec = markets["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
         max_co2_emissions = markets["Effective Carbon Credit Cap"].to_numpy() / 12
+        margin = margin
+        labour = labour
     else:
         electricity_market = market_data["electricity_market"]
         electricity_market_sold = market_data["electricity_market_sold"]
@@ -451,6 +455,8 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         em_ng = market_data["em_ng"]
         em_elec = market_data["em_elec"]
         max_co2_emissions = market_data["max_co2_emissions"]
+        margin = market_data["margin"]
+        labour = market_data["labour"]
 
     active_eb = eb_allowed
     active_h2 = h2_allowed
@@ -803,7 +809,9 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         shortfall_penalty[h] * model.grid_reduction_shortfall[h]
         for h in model.HOURS))
 
-
+    model.labour = Expression(expr=sum(
+        labour[i] * 100000
+        for i in model.INTERVALS) / len(model.INTERVALS))
     # ------------------ Revenue Expressions ------------------
     # Revenue from selling excess electricity.
     model.elec_sold_expr = Expression(expr=sum(
@@ -822,13 +830,12 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
 
     # Production revenue (e.g., based on production output and a price per tonne).
     model.production_revenue = Expression(expr=sum(
-        model.production_output[h] for h in model.HOURS) * resin_per_tonne)
+        model.production_output[h] * margin[h] for h in model.HOURS) )
 
     # Ancillary revenue (e.g., from demand response or other ancillary services).
     model.ancillary_revenue = Expression(expr=sum(
         reward[h] * model.elec_reduction[h]
         for h in model.HOURS) * 1E3)
-
 
     # ------------------ Aggregated Total Expressions ------------------
     # Total costs: Sum of all cost components.
@@ -838,6 +845,7 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         model.fuel_cost_H2 +
         model.fuel_cost_BM +
         model.carbon_cost +
+        model.labour +
         model.transport_storage_cost +
         model.shortfall_penalty_total)
 
