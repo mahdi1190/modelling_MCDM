@@ -7,16 +7,27 @@ def load_config(config_file='config.json'):
         config = json.load(f)
     return config
 
-
 def initialize_dataframe(start_date, end_date):
-    date_range = pd.date_range(start=start_date, end=end_date, freq='h')  # Use 'h' for hourly frequency
+    date_range = pd.date_range(start=start_date, end=end_date, freq='h')  # Hourly frequency
     df = pd.DataFrame(index=date_range)
     df['Year'] = df.index.year
     df['Month'] = df.index.month
     df['Hour'] = df.index.hour
     return df
 
-
+# NEW HELPER FUNCTION: calculates effective growth years, capped by a stabilization year if provided.
+def effective_growth_years(df, config, commodity):
+    # For hydrogen, use the existing "hydrogen_decline_cutoff_year"
+    if commodity == 'hydrogen':
+        cutoff = config.get('hydrogen_decline_cutoff_year')
+    else:
+        # For other commodities, look for a stabilization key, e.g., "electricity_stabilization_year"
+        cutoff = config.get(f"{commodity}_stabilization_year")
+    if cutoff is None:
+         return df['Years Since Start']
+    else:
+         # Calculate capped years: if the stabilization year is reached, further growth stops.
+         return np.minimum(df['Years Since Start'], cutoff - config['start_year'])
 
 def apply_annual_growth(df, config):
     df['Years Since Start'] = df['Year'] - config['start_year']
@@ -26,7 +37,7 @@ def apply_annual_growth(df, config):
     ev_start_year = config['electricity_ev_start_year']
     df.loc[df['Year'] >= ev_start_year, 'Electricity Annual Change'] += config['electricity_ev_increase']
     
-    # Renewable Adjustment
+    # Renewable Adjustment for Electricity
     renewable_start_year = config['renewable_capacity_increase']['start_year']
     df.loc[df['Year'] >= renewable_start_year, 'Electricity Annual Change'] += config['renewable_capacity_increase']['price_adjustment']
     
@@ -35,14 +46,14 @@ def apply_annual_growth(df, config):
     biomass_demand_increase_start_year = config['biomass_demand_increase_start_year']
     df.loc[df['Year'] >= biomass_demand_increase_start_year, 'Biomass Annual Change'] += config['biomass_additional_annual_increase']
     
-    # Apply Annual Growth
-    df['Electricity Price ($/kWh)'] *= (1 + df['Electricity Annual Change']) ** df['Years Since Start']
-    df['Natural Gas Price ($/kWh)'] *= (1 + config['natural_gas_annual_growth']) ** df['Years Since Start']
-    df['Hydrogen Price ($/kWh)'] *= (1 + config['hydrogen_annual_change']) ** df['Years Since Start']
-    df['Biomass Price ($/kWh)'] *= (1 + df['Biomass Annual Change']) ** df['Years Since Start']
-    df['Carbon Credit Cap (tonnes CO2/year)'] *= (1 + config['carbon_credit_cap_annual_decline']) ** df['Years Since Start']
+    # Apply Annual Growth with stabilization:
+    df['Electricity Price ($/kWh)'] *= (1 + df['Electricity Annual Change']) ** effective_growth_years(df, config, 'electricity')
+    df['Natural Gas Price ($/kWh)'] *= (1 + config['natural_gas_annual_growth']) ** effective_growth_years(df, config, 'natural_gas')
+    df['Hydrogen Price ($/kWh)'] *= (1 + config['hydrogen_annual_change']) ** effective_growth_years(df, config, 'hydrogen')
+    df['Biomass Price ($/kWh)'] *= (1 + df['Biomass Annual Change']) ** effective_growth_years(df, config, 'biomass')
+    df['Carbon Credit Cap (tonnes CO2/year)'] *= (1 + config['carbon_credit_cap_annual_decline']) ** effective_growth_years(df, config, 'carbon_credit_cap')
+    
     return df
-
 
 def apply_gradual_adjustments(df, config):
     for adjustment in config.get('gradual_adjustments', []):
@@ -52,14 +63,13 @@ def apply_gradual_adjustments(df, config):
         change_per_period = adjustment['change_per_period']
         frequency = adjustment['frequency']
         
-        # Generate date range for adjustments
+        # Generate a date range for the adjustments
         dates = pd.date_range(start=start_date, end=end_date, freq=frequency)
         
-        # Apply adjustments
+        # Apply adjustments for each date in the range
         for date in dates:
             df.loc[df.index >= date, variable] *= (1 + change_per_period)
     return df
-
 
 def calculate_renewable_share(df, config):
     start_year = config['renewable_share']['start_year']
@@ -427,33 +437,34 @@ def save_datasets(df, config):
 def generate_dataset(config):
     df = initialize_dataframe(config['start_date'], config['end_date'])
     
-    # Base prices
+    # Base prices and conversions:
     df['Electricity Price ($/kWh)'] = config['electricity_base_price']
     df['Natural Gas Price ($/kWh)'] = config['natural_gas_base_price']
+    # Convert hydrogen base price per kg into $/kWh using energy content
     df['Hydrogen Price ($/kWh)'] = config['hydrogen_base_price_per_kg'] / config['hydrogen_energy_content']
     df['Biomass Price ($/kWh)'] = config['biomass_base_price_per_tonne'] / config['biomass_energy_content_per_tonne']
     df['Carbon Credit Cap (tonnes CO2/year)'] = config['carbon_credit_cap_base']
     
-    # Carbon credit price: simple linear interpolation
+    # Carbon Credit Price: linear interpolation from base to target by projection year
     years = np.array([config['start_year'], config['carbon_credit_price_projection_year']])
     prices = np.array([config['carbon_credit_base_price'], config['carbon_credit_price_target']])
     poly = np.polyfit(years, prices, 1)
     df['Carbon Credit Price ($/tonne CO2)'] = np.polyval(poly, df['Year'])
     
-    # Add lognormal volatility to carbon credit
+    # Add lognormal volatility to carbon credit price
     np.random.seed(config['random_seed'])
     df['Carbon Credit Price ($/tonne CO2)'] *= np.random.lognormal(mean=0, sigma=config['carbon_credit_volatility'], size=len(df))
     
-    # Growth
+    # Apply growth adjustments (with stabilization)
     df = apply_annual_growth(df, config)
-    # Renewables
+    
+    # Continue with your other steps:
     df = calculate_renewable_share(df, config)
-    # Carbon intensities
     df = calculate_grid_carbon_intensity(df, config)
     df = calculate_natural_gas_carbon_intensity(df, config)
     df = calculate_hydrogen_carbon_intensity(df, config)
     df = calculate_biomass_carbon_intensity(df, config)
-    # Adjustments
+    
     df = apply_gradual_adjustments(df, config)
     df = model_exchange_rate(df, config)
     df = adjust_for_exchange_rate(df, config)
@@ -478,14 +489,14 @@ def generate_dataset(config):
     ]
     df = adjust_for_inflation(df, price_columns)
     
-    # Additional exogenous inputs
+    # Additional inputs
     df = generate_feedstock_inputs(df, config)
     df = generate_fixed_cost_inputs(df, config)
     df = generate_dynamic_resin_price(df, config)
     df = calculate_input_margin(df, config)
     
-    # NEW: Apply Real Discount Factor (for NPV)
-    df = apply_real_discount_factor(df, config)  # see function below
+    # Apply discount factor for NPV calculations
+    df = apply_real_discount_factor(df, config)
     
     save_datasets(df, config)
     return df
@@ -619,10 +630,9 @@ def main():
     df = generate_dataset(config)
     plot_volatility_and_renewable_share(df)
     
-    # CAPEX
+    # CAPEX calculations remain unchanged.
     capex_df = calculate_capex_costs(df, config)
     save_capex_dataset(capex_df, config)
-
 
 if __name__ == "__main__":
     main()

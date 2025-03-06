@@ -385,6 +385,8 @@ time_limit = 300
 def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0.25,
                eb_allowed=0, h2_allowed=0, ccs_allowed=0, demand_data=None, market_data=None,
                warm_start_values=None):    
+    # Determine scaling factor locally (not a model variable)
+    scaling_factor = 3.0 if eb_allowed else 1.0
     """
     Hourly Pyomo model that:
       - Uses hourly data (indexed by model.HOURS).
@@ -405,12 +407,13 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         os.makedirs(results_dir)
     
     # -------------------- Demand Data --------------------
+    unit_conv = 1E3
     if demand_data is None:
         demands_path = os.path.join(data_dir, 'demands_hourly_year.csv')
         # For backwards compatibility, read first year
         demands = pd.read_csv(demands_path, nrows=8761)
-        shortfall_penalty = demands["penalty"].to_numpy()
-        reward = demands["revenue"].to_numpy()
+        shortfall_penalty = demands["penalty"].to_numpy()* unit_conv
+        reward = demands["revenue"].to_numpy() * unit_conv
         request = demands["request"].to_numpy()
         electricity_demand = demands["elec"].to_numpy()
         heat_demand = demands["heat"].to_numpy()
@@ -427,7 +430,6 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
     if market_data is None:
         markets_path = os.path.join(data_dir, 'markets.csv')
         markets = pd.read_csv(markets_path, nrows=8761)
-        unit_conv = 1E3
         electricity_market = markets["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
         electricity_market_sold = electricity_market * 1E-3
         carbon_market = markets["Carbon Credit Price ($/tonne CO2)"].to_numpy()
@@ -440,8 +442,8 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         em_ng = markets["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
         em_elec = markets["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
         max_co2_emissions = markets["Effective Carbon Credit Cap"].to_numpy() / 12
-        margin = margin
-        labour = labour
+        margin = markets["Input Margin ($/tonne) PV"]
+        labour = markets["Fixed Cost ($/tonne)"]
     else:
         electricity_market = market_data["electricity_market"]
         electricity_market_sold = market_data["electricity_market_sold"]
@@ -763,13 +765,19 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         return model.production_output[h] == 1.1 * ((heat_demand[h] + electricity_demand[h]) - model.elec_reduction[h])
     model.production_output_constraint = Constraint(model.HOURS, rule=production_output_rule)
 
+    # Flexibility constraint: the maximum allowable reduction scales with the electricity demand.
     def flexibility_constraint(model, h):
-        plant_flexibility = 0.5
-        return model.elec_reduction[h] <= plant_flexibility * electricity_demand[h]
+        # Define plant flexibility based on electrification decision.
+        if eb_allowed:
+            plant_flexibility = 0.5
+        else:
+            plant_flexibility = 0.2
+        return model.elec_reduction[h] <= plant_flexibility * electricity_demand[h] * scaling_factor
     model.flexibility_constraint = Constraint(model.HOURS, rule=flexibility_constraint)
 
+    # Grid call constraint: the sum of reduction and shortfall is bounded by the grid request scaled appropriately.
     def grid_call_constraint(model, h):
-        return model.elec_reduction[h] + model.grid_reduction_shortfall[h] <= request[h]
+        return model.elec_reduction[h] + model.grid_reduction_shortfall[h] <= request[h] * scaling_factor
     model.grid_call_constraint = Constraint(model.HOURS, rule=grid_call_constraint)
 
 
@@ -806,8 +814,9 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
 
     # Shortfall penalty cost from grid reduction.
     model.shortfall_penalty_total = Expression(expr=sum(
-        shortfall_penalty[h] * model.grid_reduction_shortfall[h]
+        shortfall_penalty[h] * model.grid_reduction_shortfall[h] * scaling_factor
         for h in model.HOURS))
+
 
     model.labour = Expression(expr=sum(
         labour[i] * 100000
@@ -832,10 +841,9 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
     model.production_revenue = Expression(expr=sum(
         model.production_output[h] * margin[h] for h in model.HOURS) )
 
-    # Ancillary revenue (e.g., from demand response or other ancillary services).
     model.ancillary_revenue = Expression(expr=sum(
-        reward[h] * model.elec_reduction[h]
-        for h in model.HOURS) * 1E3)
+        reward[h] * model.elec_reduction[h] * scaling_factor
+        for h in model.HOURS))
 
     # ------------------ Aggregated Total Expressions ------------------
     # Total costs: Sum of all cost components.

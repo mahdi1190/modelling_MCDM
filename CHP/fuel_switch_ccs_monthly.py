@@ -43,7 +43,7 @@ refrigeration_demand = demands["cool"].to_numpy()
 electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv
 electricity_market_sold = electricity_market * 1E-3
 
-carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy() 
+carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy()
 
 NG_market = markets_monthly["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 1E-3
@@ -426,7 +426,8 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Create model
     model = ConcreteModel()
     ccs_energy_penalty_factor = 2  # mW thermal per tonne CO2 captured (adjust as needed)
-
+    eta_h2 = 0.9
+    eta_ng = 0.8
     # -------------- Parameters --------------
     # Time periods (e.g., months in a year)
     MONTHS = np.arange(total_months)
@@ -459,9 +460,9 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     h2_coeffs = {"elec": [0.18, 0.02, 0.0015], "thermal": [0.15, 0.04, 0.0012]}  # Placeholder
 
 
-    h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
-    eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
-    ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 14000
+    h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity * 2.2 # Example value, adjust based on your case
+    eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity * 1.8 # Example value, adjust based on your case
+    ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 30000 * 2.5
 
     max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]   # tonnes CO2
     M = 1E6
@@ -478,11 +479,11 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
         (1 + 0.05 * (co2_stream_pressure - 10)) *
         (1 + 0.2 * (co2_concentration - 0.2))
     )
-    adjusted_capture_efficiency_value = base_capture_efficiency * stream_factor
+    adjusted_capture_efficiency_value = 0.9
 
     # CCS Transport and Storage Costs
-    transport_cost_per_kg_co2 = 0.05*1E3  # $ per kg of CO2 transported
-    storage_cost_per_kg_co2 = 0.03*1E3    # $ per kg of CO2 stored
+    transport_cost_per_kg_co2 = 0.05  # $ per kg of CO2 transported
+    storage_cost_per_kg_co2 = 0.03    # $ per kg of CO2 stored
 
     # -------------- Decision Variables --------------
 
@@ -629,31 +630,8 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.fuel_energy_rule_con = Constraint(model.MONTHS, rule=fuel_energy_rule)
     
     def fuel_consumed_rule(model, m):
-        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) == model.heat_production[m] + model.ccs_energy_penalty[m]
+        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * eta_ng == model.heat_production[m] + model.ccs_energy_penalty[m]
     model.fuel_consumed_rule_con = Constraint(model.MONTHS, rule=fuel_consumed_rule)
-
-
-    def electrical_efficiency_rule(model, m):
-        efficiency_adjustment_times_CHP = (
-            (model.fuel_blend_ng[m] + model.fuel_blend_biomass[m]) * 
-            (ng_coeffs["elec"][0] * CHP_capacity + ng_coeffs["elec"][1] * model.electricity_production[m] + ng_coeffs["elec"][2] * TEMP * CHP_capacity) +
-            model.fuel_blend_h2[m] * 
-            (h2_coeffs["elec"][0] * CHP_capacity + h2_coeffs["elec"][1] * model.electricity_production[m] + h2_coeffs["elec"][2] * TEMP * CHP_capacity)
-        )
-        return model.electrical_efficiency[m] * CHP_capacity == efficiency_adjustment_times_CHP
-
-    #model.electrical_efficiency_constraint = Constraint(model.MONTHS, rule=electrical_efficiency_rule)
-
-    def thermal_efficiency_rule(model, m):
-        efficiency_adjustment_times_CHP = (
-            (model.fuel_blend_ng[m] + model.fuel_blend_biomass[m]) * 
-            (ng_coeffs["thermal"][0] * CHP_capacity + ng_coeffs["thermal"][1] * model.heat_production[m] + ng_coeffs["thermal"][2] * TEMP * CHP_capacity) +
-            model.fuel_blend_h2[m] * 
-            (h2_coeffs["thermal"][0] * CHP_capacity + h2_coeffs["thermal"][1] * model.heat_production[m] + h2_coeffs["thermal"][2] * TEMP * CHP_capacity)
-        )
-        return model.thermal_efficiency[m] * CHP_capacity == efficiency_adjustment_times_CHP
-
-    #model.thermal_efficiency_constraint = Constraint(model.MONTHS, rule=thermal_efficiency_rule)
 
     # Constraint to ensure that the sum of the fuel blend percentages equals 1.
     # Monthly fuel blending constraint
@@ -825,13 +803,13 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Captured CO2 constraint
     def captured_co2_constraint(model, m):
         interval = m // (len(model.MONTHS) // len(model.INTERVALS))
-        return model.captured_co2[m] <= adjusted_capture_efficiency_value * (model.total_fuel_co2_active_ccs[m] + res_emissions*model.active_ccs[interval])
+        return model.captured_co2[m] == adjusted_capture_efficiency_value * (model.total_fuel_co2_active_ccs[m] + res_emissions*model.active_ccs[interval])
     model.captured_co2_constraint = Constraint(model.MONTHS, rule=captured_co2_constraint)
 
     # Uncaptured CO2 constraint
     def uncaptured_co2_constraint(model, m):
         interval = m // (len(model.MONTHS) // len(model.INTERVALS))
-        return model.uncaptured_co2[m] == model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
+        return model.uncaptured_co2[m] >= model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
     model.uncaptured_co2_constraint = Constraint(model.MONTHS, rule=uncaptured_co2_constraint)
 
         # Already declared earlier: model.ccs_energy_penalty = Var(model.MONTHS, within=NonNegativeReals)
@@ -870,7 +848,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Hydrogen fuel cost.
     model.fuel_cost_H2 = Expression(expr=sum(
-        model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m]
+        model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m] * (eta_ng/eta_h2)
         for m in model.MONTHS))
 
     # Biomass fuel cost.
