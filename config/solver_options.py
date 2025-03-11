@@ -19,6 +19,8 @@ def get_solver(time_limit):
     solver.options['mipgap'] = 0.01
     solver.options['Presolve'] = 2  # Gurobi's highest level of presolve
     solver.options['ConcurrentMIP'] = 2
+    solver.options['PoolSolutions'] = 1  # Store up to 10 solutions
+    solver.options['PoolSearchMode'] = 2    # More exhaustive search for multiple solutions
 
     
     return solver

@@ -7,11 +7,11 @@
   "monthly_dataset_filename": "markets_monthly.csv",
   "capex_dataset_filename": "capex_costs_over_time.csv",
 
-  "electricity_base_price": 0.12,
-  "natural_gas_base_price": 0.03,
+  "electricity_base_price": 0.22,
+  "natural_gas_base_price": 0.045,
   "hydrogen_base_price_per_kg": 6.50,
   "biomass_base_price_per_tonne": 450.00,
-  "carbon_credit_cap_base": 15000,
+  "carbon_credit_cap_base": 27000,
 
   "hydrogen_energy_content": 33.33,
   "biomass_energy_content_per_tonne": 4500,
@@ -19,13 +19,18 @@
   "electricity_annual_growth": -0.005,
   "electricity_ev_start_year": 2030,
   "electricity_ev_increase": 0.0,
-  "natural_gas_annual_growth": 0.015,
-  "hydrogen_annual_change": -0.111,
+  "natural_gas_annual_growth": 0.01,
+  "hydrogen_annual_change": -0.09,
   "hydrogen_decline_cutoff_year": 2035,
   "biomass_annual_change": 0.02,
   "biomass_demand_increase_start_year": 2025,
   "biomass_additional_annual_increase": 0.005,
   "carbon_credit_cap_annual_decline": -0.07,
+
+  "electricity_stabilization_year": 2035,
+  "natural_gas_stabilization_year": 2035,
+  "biomass_stabilization_year": 2040,
+  "carbon_credit_cap_stabilization_year": 2055,
 
   "seasonality": {
     "winter_months": [11, 12, 1, 2, 3],
@@ -38,7 +43,7 @@
   "natural_gas_volatility": 0.10,
   "biomass_volatility": 0.05,
   "hydrogen_volatility": 0.08,
-  "carbon_credit_volatility": 0.1,
+  "carbon_credit_volatility": 0.2,
 
   "renewable_share": {
     "start_year": 2025,
@@ -54,13 +59,13 @@
   },
 
   "grid_carbon_intensity": {
-    "base_intensity": 0.3,
+    "base_intensity": 0.21,
     "target_intensity": 0.05,
     "variation": {
       "daily_cycle": true,
       "peak_hours": [17, 18, 19, 20],
-      "peak_multiplier": 1.1,
-      "off_peak_multiplier": 0.9
+      "peak_multiplier": 1.2,
+      "off_peak_multiplier": 0.8
     }
   },
 
@@ -73,13 +78,13 @@
 
   "hydrogen_carbon_intensity": {
     "base_intensity": 0.12,
-    "target_intensity": 0.02,
+    "target_intensity": 0,
     "transition_start_year": 2030,
-    "transition_end_year": 2040
+    "transition_end_year": 2035
   },
 
   "biomass_carbon_intensity": {
-    "fixed_intensity": 0.01
+    "fixed_intensity": 0
   },
 
   "hydrogen_correlation_base": 0.5,
@@ -89,8 +94,8 @@
   "natural_gas_correlation_min": 0.05,
 
   "biomass_natural_gas_correlation_base": 0.2,
-  "biomass_natural_gas_correlation_change_per_year": 0.01,
-  "biomass_natural_gas_correlation_max": 0.5,
+  "biomass_natural_gas_correlation_decay": 0.5,
+  "biomass_natural_gas_correlation_min": 0.05,
 
   "ccs_start_year": 2030,
   "ccs_max_reduction": 0.5,
@@ -102,7 +107,7 @@
   "carbon_tax_increase_interval": 5,
 
   "carbon_credit_base_price": 80.00,
-  "carbon_credit_price_target": 200.00,
+  "carbon_credit_price_target": 250.00,
   "carbon_credit_price_projection_year": 2050,
 
   "renewable_capacity_increase": {
@@ -150,14 +155,14 @@
   "speculation_spike_multiplier": 1.2,
 
   "inflation_rates": {
-    "2025": 0.018,
+    "2025": 0.025,
     "2026": 0.022,
     "2027": 0.019,
     "2028": 0.021,
-    "2029": 0.02,
-    "2030": 0.023,
-    "2031": 0.019,
-    "2032": 0.02,
+    "2029": 0.03,
+    "2030": 0.035,
+    "2031": 0.025,
+    "2032": 0.022,
     "2033": 0.021,
     "2034": 0.022,
     "2035": 0.018,
@@ -191,7 +196,8 @@
       "impacts": {
         "Natural Gas Price ($/kWh)": 2.0,
         "Electricity Price ($/kWh)": 2.5,
-        "Hydrogen Price ($/kWh)": 2.5
+        "Hydrogen Price ($/kWh)": 2.5,
+        "Biomass Price ($/kWh)": 2.0
       }
     },
     {
@@ -233,7 +239,7 @@
       "start_date": "2035-01-01",
       "end_date": "2055-12-31",
       "impacts": {
-        "Hydrogen Price ($/kWh)": 0.85
+        "Hydrogen Price ($/kWh)": 1
       }
     },
     {
@@ -328,5 +334,41 @@
         }
       ]
     }
-  }
+  },
+  "epoxy_resin_carbon_cap_fraction": 0.9,
+  "capex_inflation_rate": 0.02,
+
+
+    "selling_price_per_tonne": 4000,
+    "resin_mu": 0,
+    "resin_sigma": 0,
+    "resin_events": [
+      {
+        "name": "High Demand",
+        "start_year": 2030,
+        "end_year": 2032,
+        "price_multiplier": 1.10
+      },
+      {
+        "name": "Market Correction",
+        "start_year": 2040,
+        "end_year": 2040,
+        "price_multiplier": 0.95
+      }
+    ],
+    "bpa_base_price": 1500,
+    "ech_base_price": 2500,
+    "real_discount_rate": 0.02,
+    "bpa_correlation_with_ng": 0.8,
+    "ech_correlation_with_ng": 0.8,
+    "fixed_costs": {
+      "labour_cost_per_year": 20000000,
+      "overhead_cost_per_year": 10000000,
+      "maintenance_cost_per_year": 5000000,
+      "depreciation_per_year": 5000000,
+      "environmental_compliance_cost_per_year": 5000000
+    },
+    "production_tonnage": 100000,
+    "fixed_cost_growth": 0.02
 }
+

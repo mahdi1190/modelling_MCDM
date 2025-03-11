@@ -8,9 +8,13 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config')))
 # Import the solver options
 from solver_options import get_solver
+import datetime
 import numpy as np
 import locale
 import gc
+
+BASE_NAME = "base_case"
+
 gc.disable()  # Disable garbage collection temporarily
 
 locale.setlocale(locale.LC_ALL, '')  # Setting locale once here
@@ -24,7 +28,6 @@ current_dir = os.path.dirname(__file__)
 # Construct paths to the data files by correctly moving up one directory to 'modelling_MCDM'
 demands_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'demands_monthly_30.csv'))
 markets_monthly_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets_monthly.csv'))
-markets_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'markets.csv'))  # Corrected path
 
 capex_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'capex_costs_over_time.csv'))  # Corrected path
 unit_conv = 1E3
@@ -37,22 +40,22 @@ electricity_demand = demands["elec"].to_numpy()
 heat_demand = demands["heat"].to_numpy()
 refrigeration_demand = demands["cool"].to_numpy()
 
-electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv 
+electricity_market = markets_monthly["Electricity Price ($/kWh)"].to_numpy() * unit_conv
 electricity_market_sold = electricity_market * 1E-3
 
-carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy() 
+carbon_market = markets_monthly["Carbon Credit Price ($/tonne CO2)"].to_numpy()
 
 NG_market = markets_monthly["Natural Gas Price ($/kWh)"].to_numpy()  * unit_conv
 heat_market_sold = NG_market * 1E-3
-H2_market = markets_monthly["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv
+H2_market = markets_monthly["Hydrogen Price ($/kWh)"].to_numpy()  * unit_conv 
 BM_market = markets_monthly["Biomass Price ($/kWh)"].to_numpy() * unit_conv
 
 em_bm = markets_monthly["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_h2 = markets_monthly["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
-res_emissions = 1000
-CHP_capacity = 12000
+res_emissions = 450
+CHP_capacity = 10000
 
 energy_ratio = 0.25
 
@@ -308,9 +311,113 @@ def update_graphs(n_intervals):
            f"Final CHP Capacity: {round(final_chp_capacity, 2)} KW", \
            f"Energy Ratio: {round(energy_ratio, 2)}", \
            f"Model Cost: {locale.currency(model_cost, grouping=True)}", \
-           f"Credit Cost: NaN",  
+           f"Credit Cost: {locale.currency(sum(credits[i] * carbon_market[i] for i in model.INTERVALS), grouping=True)}",  
     else:
         raise dash.exceptions.PreventUpdate
+
+
+def save_all_model_variables(model, total_months, no_intervals, results_folder, timestamp, simulation_name):
+    """
+    Save model variables and expressions into one CSV file.
+    Rows correspond to months [0, total_months-1].
+    For components indexed by MONTHS, the value is taken directly.
+    For components indexed by INTERVALS, we map each month to an interval using:
+        interval = m // (total_months // no_intervals)
+    Scalar components are replicated for each month.
+    Components indexed over other sets are skipped.
+    """
+    # Create a list of months (time index)
+    months = list(range(total_months))
+    
+    # Mapping function from month to interval.
+    def month_to_interval(m):
+        return m // (total_months // no_intervals)
+    
+    # Prepare a dictionary to build the DataFrame.
+    data = {'Time': months}
+    
+    # Try to access your model sets, if defined.
+    try:
+        model_months = set(model.MONTHS)
+    except AttributeError:
+        model_months = None
+
+    try:
+        model_intervals = set(model.INTERVALS)
+    except AttributeError:
+        model_intervals = None
+
+    # Process all Var components.
+    for comp in model.component_objects(Var, active=True):
+        comp_name = comp.name
+        col = []  # values for each month
+        try:
+            if not comp.is_indexed():
+                # Scalar variable: replicate its value.
+                scalar_val = value(comp)
+                col = [scalar_val] * total_months
+            else:
+                keys = list(comp.keys())
+                keys_set = set(keys)
+                if model_months is not None and keys_set == model_months:
+                    for m in months:
+                        col.append(value(comp[m]))
+                elif model_intervals is not None and keys_set == model_intervals:
+                    for m in months:
+                        interval = month_to_interval(m)
+                        col.append(value(comp[interval]))
+                else:
+                    print(f"Skipping variable '{comp_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
+                    continue
+        except Exception as e:
+            print(f"Error processing variable '{comp_name}': {e}")
+            continue
+        data[comp_name] = col
+
+    # Process all Expression components.
+    for comp in model.component_objects(Expression, active=True):
+        comp_name = comp.name
+        col = []  # values for each month
+        try:
+            if not comp.is_indexed():
+                # Scalar expression: replicate its value.
+                scalar_val = value(comp)
+                col = [scalar_val] * total_months
+            else:
+                keys = list(comp.keys())
+                keys_set = set(keys)
+                if model_months is not None and keys_set == model_months:
+                    for m in months:
+                        col.append(value(comp[m]))
+                elif model_intervals is not None and keys_set == model_intervals:
+                    for m in months:
+                        interval = month_to_interval(m)
+                        col.append(value(comp[interval]))
+                else:
+                    print(f"Skipping expression '{comp_name}' because its indexing does not match MONTHS or INTERVALS exclusively.")
+                    continue
+        except Exception as e:
+            print(f"Error processing expression '{comp_name}': {e}")
+            continue
+        data[comp_name] = col
+
+    # Create the DataFrame and save to CSV.
+    df = pd.DataFrame(data)
+    filepath = os.path.join(results_folder, f"{simulation_name}_monthly.csv")
+    df.to_csv(filepath, index=False)
+    print(f"Saved mapped model variables and expressions to {filepath}")
+
+
+
+def create_results_folder():
+    # Change here: use BASE_NAME only once
+    base_dir = os.path.join(os.path.dirname(__file__), "results", BASE_NAME)
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
+        print("Created results folder:", base_dir)
+    else:
+        print("Results folder already exists:", base_dir)
+    return base_dir
 
 total_months = 360
 time_limit = 300
@@ -318,7 +425,9 @@ time_limit = 300
 def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacity=CHP_capacity, energy_ratio = energy_ratio):
     # Create model
     model = ConcreteModel()
-
+    ccs_energy_penalty_factor = 2  # mW thermal per tonne CO2 captured (adjust as needed)
+    eta_h2 = 0.75
+    eta_ng = 0.7
     # -------------- Parameters --------------
     # Time periods (e.g., months in a year)
     MONTHS = np.arange(total_months)
@@ -351,11 +460,11 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     h2_coeffs = {"elec": [0.18, 0.02, 0.0015], "thermal": [0.15, 0.04, 0.0012]}  # Placeholder
 
 
-    h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
-    eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity # Example value, adjust based on your case
-    ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 14000
+    h2_capex = capex["Hydrogen CHP Retrofit CAPEX ($/kW)"].to_numpy() * CHP_capacity * 2.2 # Example value, adjust based on your case
+    eb_capex = capex["Electric Boiler CAPEX ($/kW)"].to_numpy() * CHP_capacity * 1.8 # Example value, adjust based on your case
+    ccs_capex = capex["CCS System CAPEX ($/tonne CO2/year)"] * 30000 * 2.5
 
-    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]  # tonnes CO2
+    max_co2_emissions = markets_monthly["Effective Carbon Credit Cap"]   # tonnes CO2
     M = 1E6
 
     # CO2 stream properties (can be varied)
@@ -364,17 +473,17 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     co2_concentration = 0.2  # CO2 concentration in flue gas
 
     # --- Compute adjusted_capture_efficiency outside constraints ---
-    base_capture_efficiency = 0.9  # Base capture efficiency
+    base_capture_efficiency = 0.8  # Base capture efficiency
     stream_factor = (
         (1 - 0.0001 * (co2_stream_temp - 300)) *
         (1 + 0.05 * (co2_stream_pressure - 10)) *
         (1 + 0.2 * (co2_concentration - 0.2))
     )
-    adjusted_capture_efficiency_value = base_capture_efficiency * stream_factor
+    adjusted_capture_efficiency_value = 0.9
 
     # CCS Transport and Storage Costs
-    transport_cost_per_kg_co2 = 0.05*1E3  # $ per kg of CO2 transported
-    storage_cost_per_kg_co2 = 0.03*1E3    # $ per kg of CO2 stored
+    transport_cost_per_kg_co2 = 0.05  # $ per kg of CO2 transported
+    storage_cost_per_kg_co2 = 0.03    # $ per kg of CO2 stored
 
     # -------------- Decision Variables --------------
 
@@ -386,8 +495,8 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     model.heat_to_elec = Var(model.MONTHS, within=NonNegativeReals)
     
-    model.electrical_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1))
-    model.thermal_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1))
+    model.electrical_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1),  initialize=1)
+    model.thermal_efficiency = Var(model.MONTHS, within=NonNegativeReals, bounds=(1, 1), initialize=1)
 
     # Fuel variables (change from INTERVALS to MONTHS)
     model.fuel_blend_ng = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, 1))
@@ -418,24 +527,24 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Overproduction and Ramp Rate
     model.heat_over_production = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(heat_demand)))
     model.electricity_over_production = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(electricity_demand)))
-    model.ramp_rate = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max_ramp_rate))
+    model.ramp_rate = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max_ramp_rate), initialize=max_ramp_rate)
 
     # Refrigeration
     model.refrigeration_produced = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.heat_used_for_cooling = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     model.elec_used_for_cooling = Var(model.MONTHS, within=NonNegativeReals, bounds=(0, max(refrigeration_demand)))
     # Variables
-    model.co2_emissions = Var(model.MONTHS, within=NonNegativeReals)
+    model.co2_emissions = Var(model.MONTHS, within=NonNegativeReals, initialize=0)
     model.total_emissions_per_interval = Var(model.INTERVALS, within=NonNegativeReals)
     model.carbon_credits = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals)
-    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals)
-    model.exceeds_cap = Var(model.INTERVALS, within=Binary)
-    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)))
-    model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max(max_co2_emissions*10),max(max_co2_emissions*10)))
+    model.credits_purchased = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.credits_earned = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)), initialize=0)
+    model.credits_sold = Var(model.INTERVALS, within=NonNegativeReals, initialize=0)
+    model.exceeds_cap = Var(model.INTERVALS, within=Binary,  initialize=0)
+    model.credits_held = Var(model.INTERVALS, within=NonNegativeReals, bounds=(0, max(max_co2_emissions*10)),  initialize=0)
+    model.emissions_difference = Var(model.INTERVALS, domain=Reals, bounds=(-max(max_co2_emissions*10),max(max_co2_emissions*10)),  initialize=0)
     model.credits_used_to_offset = Var(model.INTERVALS, within=NonNegativeReals,bounds=(0, max(max_co2_emissions*10)))
-    model.below_cap = Var(model.INTERVALS, within=Binary)
+    model.below_cap = Var(model.INTERVALS, within=Binary,  initialize=1)
 
         # Define time-indexed CAPEX parameters (for each interval i)
     model.h2_capex = Param(model.INTERVALS, within=NonNegativeReals, initialize={i: h2_capex[i] for i in model.INTERVALS})
@@ -519,32 +628,10 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     def fuel_energy_rule(model, m):
         return model.fuel_energy[m] == model.fuel_blend_ng[m] + model.fuel_blend_h2[m] + model.fuel_blend_biomass[m]
     model.fuel_energy_rule_con = Constraint(model.MONTHS, rule=fuel_energy_rule)
-    # Fuel Consumption
+    
     def fuel_consumed_rule(model, m):
-        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * 0.7 == model.heat_production[m]
+        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * eta_ng == model.heat_production[m] + model.ccs_energy_penalty[m]
     model.fuel_consumed_rule_con = Constraint(model.MONTHS, rule=fuel_consumed_rule)
-
-    def electrical_efficiency_rule(model, m):
-        efficiency_adjustment_times_CHP = (
-            (model.fuel_blend_ng[m] + model.fuel_blend_biomass[m]) * 
-            (ng_coeffs["elec"][0] * CHP_capacity + ng_coeffs["elec"][1] * model.electricity_production[m] + ng_coeffs["elec"][2] * TEMP * CHP_capacity) +
-            model.fuel_blend_h2[m] * 
-            (h2_coeffs["elec"][0] * CHP_capacity + h2_coeffs["elec"][1] * model.electricity_production[m] + h2_coeffs["elec"][2] * TEMP * CHP_capacity)
-        )
-        return model.electrical_efficiency[m] * CHP_capacity == efficiency_adjustment_times_CHP
-
-    #model.electrical_efficiency_constraint = Constraint(model.MONTHS, rule=electrical_efficiency_rule)
-
-    def thermal_efficiency_rule(model, m):
-        efficiency_adjustment_times_CHP = (
-            (model.fuel_blend_ng[m] + model.fuel_blend_biomass[m]) * 
-            (ng_coeffs["thermal"][0] * CHP_capacity + ng_coeffs["thermal"][1] * model.heat_production[m] + ng_coeffs["thermal"][2] * TEMP * CHP_capacity) +
-            model.fuel_blend_h2[m] * 
-            (h2_coeffs["thermal"][0] * CHP_capacity + h2_coeffs["thermal"][1] * model.heat_production[m] + h2_coeffs["thermal"][2] * TEMP * CHP_capacity)
-        )
-        return model.thermal_efficiency[m] * CHP_capacity == efficiency_adjustment_times_CHP
-
-    #model.thermal_efficiency_constraint = Constraint(model.MONTHS, rule=thermal_efficiency_rule)
 
     # Constraint to ensure that the sum of the fuel blend percentages equals 1.
     # Monthly fuel blending constraint
@@ -716,15 +803,19 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Captured CO2 constraint
     def captured_co2_constraint(model, m):
         interval = m // (len(model.MONTHS) // len(model.INTERVALS))
-        return model.captured_co2[m] <= adjusted_capture_efficiency_value * (model.total_fuel_co2_active_ccs[m] + res_emissions*model.active_ccs[interval])
+        return model.captured_co2[m] == adjusted_capture_efficiency_value * (model.total_fuel_co2_active_ccs[m] + res_emissions*model.active_ccs[interval])
     model.captured_co2_constraint = Constraint(model.MONTHS, rule=captured_co2_constraint)
 
     # Uncaptured CO2 constraint
     def uncaptured_co2_constraint(model, m):
         interval = m // (len(model.MONTHS) // len(model.INTERVALS))
-        return model.uncaptured_co2[m] == model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
+        return model.uncaptured_co2[m] >= model.total_fuel_co2[m] + res_emissions*(1-model.active_ccs[interval]) - model.captured_co2[m]
     model.uncaptured_co2_constraint = Constraint(model.MONTHS, rule=uncaptured_co2_constraint)
 
+        # Already declared earlier: model.ccs_energy_penalty = Var(model.MONTHS, within=NonNegativeReals)
+    def ccs_energy_penalty_rule(model, m):
+        return model.ccs_energy_penalty[m] == ccs_energy_penalty_factor * model.captured_co2[m]
+    model.ccs_energy_penalty_constraint = Constraint(model.MONTHS, rule=ccs_energy_penalty_rule)
 
     # Adjust Electricity Production Constraint to include CCS energy penalty
     def electricity_production_constraint(model, m):
@@ -744,78 +835,95 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.transport_storage_cost_constraint = Constraint(model.INTERVALS, rule=transport_and_storage_cost_rule)
 
     # -------------- Objective Function --------------
+    # ------------------ Cost Expressions ------------------
+    # Electricity cost: cost of purchased electricity and heat conversion.
+    model.elec_cost = Expression(expr=sum(
+        (model.purchased_electricity[m] + model.heat_to_elec[m]) * electricity_market[m]
+        for m in model.MONTHS))
 
-    # Modify the objective function to include CCS-related costs
-    def objective_rule(model):
-        # Existing cost components
-        elec_cost = sum(
-            (model.purchased_electricity[m] + model.heat_to_elec[m]) * electricity_market[m]
-            for m in model.MONTHS
-        )
-        elec_sold = sum(
-            model.electricity_over_production[m] * electricity_market_sold[m]
-            for m in model.MONTHS
-        )
-        heat_sold = sum(
-            heat_market_sold[m] * model.heat_over_production[m]
-            for m in model.MONTHS
-        )
+    # Natural Gas fuel cost.
+    model.fuel_cost_NG = Expression(expr=sum(
+        model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]
+        for m in model.MONTHS))
 
-        fuel_cost_NG = sum(
-            model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
-        fuel_cost_H2 = sum(
-            model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
-        fuel_cost_BM = sum(
-            model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]
-            for m in model.MONTHS
-        )
+    # Hydrogen fuel cost.
+    model.fuel_cost_H2 = Expression(expr=sum(
+        model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m] * (eta_ng/eta_h2)
+        for m in model.MONTHS))
 
-        carbon_cost = sum(
-            model.carbon_credits[i] * carbon_market[i]
-            for i in model.INTERVALS
-        )
-        carbon_sold = sum(
-            model.credits_sold[i] * carbon_market[i]
-            for i in model.INTERVALS
-        )
+    # Biomass fuel cost.
+    model.fuel_cost_BM = Expression(expr=sum(
+        model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]
+        for m in model.MONTHS))
 
-        # CCS-related costs
-        transport_storage_cost = sum(
-            model.transport_cost[i]
-            for i in model.INTERVALS
-        )
-        ccs_investment_cost = sum(
-            model.invest_time_ccs[i] * model.ccs_capex[i]
-            for i in model.INTERVALS
-        )
+    # Carbon cost from credits purchased (indexed over INTERVALS).
+    model.carbon_cost = Expression(expr=sum(
+        model.carbon_credits[i] * carbon_market[i]
+        for i in model.INTERVALS))
 
-        # Time-dependent CAPEX for hydrogen and electrification
-        h2_investment_cost = sum(
-            model.invest_time[i] * model.h2_capex[i]
-            for i in model.INTERVALS
-        )
-        eb_investment_cost = sum(
-            model.invest_time_eb[i] * model.eb_capex[i]
-            for i in model.INTERVALS
-        )
+    # ------------------ Investment and CCS-Related Costs ------------------
+    # Transport and storage cost for captured CO₂ (indexed over INTERVALS).
+    model.transport_storage_cost = Expression(expr=sum(
+        model.transport_cost[i]
+        for i in model.INTERVALS))
 
-        # Total costs
-        total_costs = (
-            fuel_cost_NG + fuel_cost_H2 + fuel_cost_BM +
-            elec_cost + carbon_cost +
-            h2_investment_cost + eb_investment_cost + ccs_investment_cost +
-            transport_storage_cost
-        )
+    # CCS investment cost.
+    model.ccs_investment_cost = Expression(expr=sum(
+        model.invest_time_ccs[i] * model.ccs_capex[i]
+        for i in model.INTERVALS))
 
-        # Total revenues
-        total_revenues = elec_sold + heat_sold + carbon_sold
+    # Investment cost for hydrogen.
+    model.h2_investment_cost = Expression(expr=sum(
+        model.invest_time[i] * model.h2_capex[i]
+        for i in model.INTERVALS))
 
-        return total_costs - total_revenues 
-    model.objective = Objective(rule=objective_rule, sense=minimize)
+    # Investment cost for electrification.
+    model.eb_investment_cost = Expression(expr=sum(
+        model.invest_time_eb[i] * model.eb_capex[i]
+        for i in model.INTERVALS))
+
+    # ------------------ Revenue Expressions ------------------
+    # Revenue from selling excess electricity.
+    model.elec_sold_expr = Expression(expr=sum(
+        model.electricity_over_production[m] * electricity_market_sold[m]
+        for m in model.MONTHS))
+
+    # Revenue from selling excess heat.
+    model.heat_sold_expr = Expression(expr=sum(
+        heat_market_sold[m] * model.heat_over_production[m]
+        for m in model.MONTHS))
+
+    # Revenue from selling carbon credits (indexed over INTERVALS).
+    model.carbon_sold_expr = Expression(expr=sum(
+        model.credits_sold[i] * carbon_market[i]
+        for i in model.INTERVALS))
+
+    # ------------------ Aggregated Expressions ------------------
+    # Total costs: Sum of all cost and investment components.
+    model.total_costs = Expression(expr=
+        model.fuel_cost_NG +
+        model.fuel_cost_H2 +
+        model.fuel_cost_BM +
+        model.elec_cost +
+        model.carbon_cost +
+        model.h2_investment_cost +
+        model.eb_investment_cost +
+        model.ccs_investment_cost +
+        model.transport_storage_cost)
+
+    # Total revenues: Sum of all revenue components.
+    model.total_revenues = Expression(expr=
+        model.elec_sold_expr +
+        model.heat_sold_expr +
+        model.carbon_sold_expr)
+
+    # ------------------ Objective Expression ------------------
+    # Objective: minimize total costs minus total revenues.
+    model.objective_expr = Expression(expr=model.total_costs - model.total_revenues)
+
+    # Set the model objective.
+    model.objective = Objective(expr=model.objective_expr, sense=minimize)
+
 
     # -------------- Solver --------------
 
@@ -912,6 +1020,20 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Save to CSV
     investment_info.to_csv('investment_info.csv', index=False)
+
+    # ---------------------------
+    # Save every model variable mapped by time (month)
+    
+    # Create a timestamp string (e.g., "20250218_153045")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Define your results folder (e.g., "results/monthly_results" relative to current_dir)
+    results_folder = os.path.join(current_dir, 'results', BASE_NAME)
+    os.makedirs(results_folder, exist_ok=True)
+    
+    # Save the model variables to one CSV file.
+    save_all_model_variables(model, total_months, 30, results_folder, timestamp, BASE_NAME)
+    # ---------------------------
+
     return model
 
 gc.enable()  # Re-enable garbage collection after the critical section

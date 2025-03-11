@@ -1,0 +1,5 @@
+# Ignore the single file in the root
+markets.csv
+
+# Ignore everything in the CHP/results folder
+CHP/results/
