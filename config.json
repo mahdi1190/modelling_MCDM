@@ -7,8 +7,8 @@
   "monthly_dataset_filename": "markets_monthly.csv",
   "capex_dataset_filename": "capex_costs_over_time.csv",
 
-  "electricity_base_price": 0.12,
-  "natural_gas_base_price": 0.035,
+  "electricity_base_price": 0.22,
+  "natural_gas_base_price": 0.045,
   "hydrogen_base_price_per_kg": 6.50,
   "biomass_base_price_per_tonne": 450.00,
   "carbon_credit_cap_base": 27000,
@@ -59,7 +59,7 @@
   },
 
   "grid_carbon_intensity": {
-    "base_intensity": 0.22,
+    "base_intensity": 0.21,
     "target_intensity": 0.05,
     "variation": {
       "daily_cycle": true,
