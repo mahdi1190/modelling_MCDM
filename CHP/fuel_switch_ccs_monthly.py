@@ -51,7 +51,7 @@ em_bm = markets_monthly["Biomass Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_h2 = markets_monthly["Hydrogen Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_ng = markets_monthly["Natural Gas Carbon Intensity (kg CO2/kWh)"].to_numpy()
 em_elec = markets_monthly["Grid Carbon Intensity (kg CO2/kWh)"].to_numpy()
-res_emissions = 15000
+res_emissions = 1000
 CHP_capacity = 12000
 
 energy_ratio = 0.25
