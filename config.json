@@ -20,7 +20,7 @@
   "electricity_ev_start_year": 2030,
   "electricity_ev_increase": 0.0,
   "natural_gas_annual_growth": 0.01,
-  "hydrogen_annual_change": -0.09,
+  "hydrogen_annual_change": -0.085,
   "hydrogen_decline_cutoff_year": 2035,
   "biomass_annual_change": 0.02,
   "biomass_demand_increase_start_year": 2025,
@@ -42,8 +42,8 @@
   "electricity_volatility_base": 0.05,
   "natural_gas_volatility": 0.10,
   "biomass_volatility": 0.05,
-  "hydrogen_volatility": 0.08,
-  "carbon_credit_volatility": 0.2,
+  "hydrogen_volatility": 0.1,
+  "carbon_credit_volatility": 0.25,
 
   "renewable_share": {
     "start_year": 2025,
@@ -88,7 +88,7 @@
   },
 
   "hydrogen_correlation_base": 0.5,
-  "hydrogen_correlation_max": 0.95,
+  "hydrogen_correlation_max": 0.8,
   
   "natural_gas_correlation_base": 0.4,
   "natural_gas_correlation_min": 0.05,
@@ -239,7 +239,7 @@
       "start_date": "2035-01-01",
       "end_date": "2055-12-31",
       "impacts": {
-        "Hydrogen Price ($/kWh)": 1
+        "Hydrogen Price ($/kWh)": 1.1
       }
     },
     {

@@ -780,8 +780,6 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
         return model.elec_reduction[h] + model.grid_reduction_shortfall[h] <= request[h] * scaling_factor
     model.grid_call_constraint = Constraint(model.HOURS, rule=grid_call_constraint)
 
-
-
     # ------------------ Cost Expressions ------------------
     # Electricity cost: cost of purchased electricity and converting heat to electricity.
     model.elec_cost = Expression(expr=sum(

@@ -427,7 +427,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model = ConcreteModel()
     ccs_energy_penalty_factor = 2  # mW thermal per tonne CO2 captured (adjust as needed)
     eta_h2 = 0.75
-    eta_ng = 0.7
+    eta_ng = 0.65
     # -------------- Parameters --------------
     # Time periods (e.g., months in a year)
     MONTHS = np.arange(total_months)
