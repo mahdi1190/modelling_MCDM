@@ -11,7 +11,7 @@ from pyomo.environ import value, Var, Expression  # Needed for saving results
 # --------------------------
 # Global Parameters
 # --------------------------
-BASE_NAME = "base_case"         # Used for naming results folder/files
+BASE_NAME = "B"         # Used for naming results folder/files
 hours_per_year = 8760           # Number of hours per simulation year
 total_years = 30                # Total simulation years (the CSV files should have total_years*8760 rows)
 time_limit = 90                 # Time limit for solver (seconds)

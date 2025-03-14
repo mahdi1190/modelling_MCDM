@@ -22,7 +22,8 @@ last_mod_time = 0
 # ================================
 # Define File Paths and Read Data
 # ================================
-
+eta_h2 = 0.85
+eta_ng = 0.7
 current_dir = os.path.dirname(__file__)
 data_dir = os.path.abspath(os.path.join(current_dir, '..', 'data'))
 results_dir = os.path.abspath(os.path.join(current_dir, '..', 'results'))
@@ -471,7 +472,7 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
     model.HOURS = Set(initialize=HOURS)
 
     # Define INTERVALS to represent months (e.g., 12 intervals if total_hours=8760)
-    no_intervals = 12
+    no_intervals = 1
     intervals_time = int(total_hours / no_intervals)
     INTERVALS = np.arange(no_intervals)
     model.INTERVALS = Set(initialize=INTERVALS)
@@ -577,9 +578,9 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
     # ----------------- Expressions -----------------
     def total_fuel_co2_rule(model, h):
         interval = h // intervals_time
-        return (model.fuel_blend_ng[interval] * em_ng[h] +
-                model.fuel_blend_h2[interval] * em_h2[h] +
-                model.fuel_blend_biomass[interval] * em_bm[h]) * model.fuel_consumed[h]
+        return ((model.fuel_blend_ng[interval] * em_ng[h] / eta_ng) +
+                (model.fuel_blend_h2[interval] * em_h2[h]/ eta_h2) +
+                (model.fuel_blend_biomass[interval] * em_bm[h]) / eta_ng) * model.fuel_consumed[h]
     model.total_fuel_co2 = Expression(model.HOURS, rule=total_fuel_co2_rule)
 
     # ----------------- Constraints -----------------
@@ -631,7 +632,7 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
 
     # (10) Fuel consumption relationship
     def fuel_consumed_rule(model, h):
-        return model.fuel_consumed[h] * (1 - energy_ratio) * 0.7 == model.heat_production[h]
+        return model.fuel_consumed[h] * (1 - energy_ratio) == model.heat_production[h]
     model.fuel_consumed_rule_con = Constraint(model.HOURS, rule=fuel_consumed_rule)
 
     # (11) H2 blending activation:
@@ -777,7 +778,7 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
 
     # Grid call constraint: the sum of reduction and shortfall is bounded by the grid request scaled appropriately.
     def grid_call_constraint(model, h):
-        return model.elec_reduction[h] + model.grid_reduction_shortfall[h] <= request[h] * scaling_factor
+        return model.elec_reduction[h] + model.grid_reduction_shortfall[h] <= request[h] * scaling_factor * 10
     model.grid_call_constraint = Constraint(model.HOURS, rule=grid_call_constraint)
 
     # ------------------ Cost Expressions ------------------
@@ -788,17 +789,17 @@ def pyomomodel(total_hours=8760, time_limit=300, CHP_capacity=15, energy_ratio=0
 
     # Natural Gas fuel cost.
     model.fuel_cost_NG = Expression(expr=sum(
-        model.fuel_blend_ng[h // intervals_time] * NG_market[h] * model.fuel_consumed[h]
+        (model.fuel_blend_ng[h // intervals_time] * NG_market[h] * model.fuel_consumed[h]) / eta_ng
         for h in model.HOURS))
 
     # Hydrogen fuel cost.
     model.fuel_cost_H2 = Expression(expr=sum(
-        model.fuel_blend_h2[h // intervals_time] * H2_market[h] * model.fuel_consumed[h]
+        (model.fuel_blend_h2[h // intervals_time] * H2_market[h] * model.fuel_consumed[h]) / eta_h2
         for h in model.HOURS))
 
     # Biomass fuel cost.
     model.fuel_cost_BM = Expression(expr=sum(
-        model.fuel_blend_biomass[h // intervals_time] * BM_market[h] * model.fuel_consumed[h]
+        (model.fuel_blend_biomass[h // intervals_time] * BM_market[h] * model.fuel_consumed[h]) / eta_ng
         for h in model.HOURS))
 
     # Carbon cost from purchasing credits (indexed over intervals).

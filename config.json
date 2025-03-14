@@ -16,12 +16,12 @@
   "hydrogen_energy_content": 33.33,
   "biomass_energy_content_per_tonne": 4500,
 
-  "electricity_annual_growth": -0.005,
+  "electricity_annual_growth": -0.03,
   "electricity_ev_start_year": 2030,
   "electricity_ev_increase": 0.0,
-  "natural_gas_annual_growth": 0.01,
-  "hydrogen_annual_change": -0.085,
-  "hydrogen_decline_cutoff_year": 2035,
+  "natural_gas_annual_growth": -0.005,
+  "hydrogen_annual_change": -0.01,
+  "hydrogen_decline_cutoff_year": 2050,
   "biomass_annual_change": 0.02,
   "biomass_demand_increase_start_year": 2025,
   "biomass_additional_annual_increase": 0.005,
@@ -36,7 +36,7 @@
     "winter_months": [11, 12, 1, 2, 3],
     "summer_months": [6, 7, 8],
     "winter_increase": 0.15,
-    "summer_decrease": 0.10
+    "summer_decrease": 0.2
   },
 
   "electricity_volatility_base": 0.05,
@@ -55,16 +55,18 @@
   "renewable_volatility": {
     "max_volatility_increase": 0.10,
     "tech_improvement_start_year": 2035,
-    "tech_volatility_reduction_rate": 0.015
+    "tech_volatility_reduction_rate": 0.05
   },
 
   "grid_carbon_intensity": {
     "base_intensity": 0.21,
-    "target_intensity": 0.05,
+    "target_intensity": 0,
+    "transition_start_year": 2025,
+    "transition_end_year": 2035,
     "variation": {
       "daily_cycle": true,
       "peak_hours": [17, 18, 19, 20],
-      "peak_multiplier": 1.2,
+      "peak_multiplier": 1.1,
       "off_peak_multiplier": 0.8
     }
   },

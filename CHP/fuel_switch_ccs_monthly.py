@@ -13,7 +13,7 @@ import numpy as np
 import locale
 import gc
 
-BASE_NAME = "base_case"
+BASE_NAME = "B"
 
 gc.disable()  # Disable garbage collection temporarily
 
@@ -426,8 +426,8 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     # Create model
     model = ConcreteModel()
     ccs_energy_penalty_factor = 2  # mW thermal per tonne CO2 captured (adjust as needed)
-    eta_h2 = 0.75
-    eta_ng = 0.65
+    eta_h2 = 0.8
+    eta_ng = 0.7
     # -------------- Parameters --------------
     # Time periods (e.g., months in a year)
     MONTHS = np.arange(total_months)
@@ -574,9 +574,9 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.total_fuel_co2_active_ccs = Var(model.MONTHS, within=NonNegativeReals)
 
     model.total_fuel_co2 = Expression(model.MONTHS, rule=lambda model, m: (
-        model.fuel_blend_ng[m] * em_ng[m] * model.fuel_consumed[m] +
-        model.fuel_blend_h2[m] * em_h2[m] * model.fuel_consumed[m] +
-        model.fuel_blend_biomass[m] * em_bm[m] * model.fuel_consumed[m]
+        (model.fuel_blend_ng[m] * em_ng[m] * model.fuel_consumed[m] / eta_ng) +
+        (model.fuel_blend_h2[m] * em_h2[m] * model.fuel_consumed[m] / eta_h2) +
+        (model.fuel_blend_biomass[m] * em_bm[m] * model.fuel_consumed[m] / eta_ng)
     ))
 
 
@@ -630,7 +630,7 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
     model.fuel_energy_rule_con = Constraint(model.MONTHS, rule=fuel_energy_rule)
     
     def fuel_consumed_rule(model, m):
-        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) * eta_ng == model.heat_production[m] + model.ccs_energy_penalty[m]
+        return model.fuel_energy[m] * model.fuel_consumed[m] * (1 - energy_ratio) == model.heat_production[m] + model.ccs_energy_penalty[m]
     model.fuel_consumed_rule_con = Constraint(model.MONTHS, rule=fuel_consumed_rule)
 
     # Constraint to ensure that the sum of the fuel blend percentages equals 1.
@@ -843,17 +843,17 @@ def pyomomodel(total_months = total_months, time_limit = time_limit, CHP_capacit
 
     # Natural Gas fuel cost.
     model.fuel_cost_NG = Expression(expr=sum(
-        model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]
+        (model.fuel_blend_ng[m] * NG_market[m] * model.fuel_consumed[m]) / eta_ng
         for m in model.MONTHS))
 
     # Hydrogen fuel cost.
     model.fuel_cost_H2 = Expression(expr=sum(
-        model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m] * (eta_ng/eta_h2)
+        (model.fuel_blend_h2[m] * H2_market[m] * model.fuel_consumed[m]) / eta_h2
         for m in model.MONTHS))
 
     # Biomass fuel cost.
     model.fuel_cost_BM = Expression(expr=sum(
-        model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]
+        (model.fuel_blend_biomass[m] * BM_market[m] * model.fuel_consumed[m]) / eta_ng
         for m in model.MONTHS))
 
     # Carbon cost from credits purchased (indexed over INTERVALS).
